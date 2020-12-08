@@ -3,3 +3,4 @@ torchvision==0.8.1
 imageio==2.9.0
 msgpack-python==1.0.0
 h5py==3.1.0
+opencv==4.5.0

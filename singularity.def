@@ -1,0 +1,10 @@
+Bootstrap: docker
+From: pytorch/pytorch:1.7.0-cuda11.0-cudnn8-devel
+
+%files
+  ./requirements.txt /requirements.txt
+
+%post
+  DEBIAN_FRONTEND=noninteractive apt-get update -y
+  DEBIAN_FRONTEND=noninteractive apt install python-opencv -y
+  conda install --force-reinstall -y  -c conda-forge -c pytorch --file /requirements.txt

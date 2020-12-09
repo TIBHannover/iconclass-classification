@@ -21,6 +21,8 @@ import msgpack
 
 from PIL import Image
 
+from datasets.utils import get_element
+
 Image.warnings.simplefilter("error", Image.DecompressionBombError)  # turn off Decompression bomb error
 Image.warnings.simplefilter("error", Image.DecompressionBombWarning)  # turn off Decompression bomb warning
 Image.MAX_IMAGE_PIXELS = 1000000000  # set max pixel up high

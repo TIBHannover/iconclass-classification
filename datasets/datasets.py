@@ -19,10 +19,9 @@ class DatasetsManager:
     def add_args(cls, parent_parser):
         parser = argparse.ArgumentParser(parents=[parent_parser], add_help=False)
 
-        parser.add_argument("-d", "--dataset", help="verbose output")
+        parser.add_argument("-d", "--dataset", help="Dasaset to be loaded")
         for dataset, c in cls._datasets.items():
             add_args = getattr(c, "add_args", None)
-            add_args(parser)
             if callable(add_args):
                 parser = add_args(parser)
         return parser
@@ -30,7 +29,7 @@ class DatasetsManager:
     def list_datasets(self):
         return self._datasets
 
-    def dataset(self, name):
+    def build_dataset(self, name, **kwargs):
 
         assert name in self._datasets, f"Dataset {name} is unknown"
-        return self._datasets[name]
+        return self._datasets[name](**kwargs)

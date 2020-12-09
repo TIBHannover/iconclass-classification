@@ -1,29 +1,35 @@
-import torch
-from torch.nn import functional as F
-from torch import nn
-from pytorch_lightning.core.lightning import LightningModule
+import argparse
 
 
-class LitMNIST(LightningModule):
-    def __init__(self):
-        super().__init__()
+class ModelsManager:
+    _models = {}
 
-        # mnist images are (1, 28, 28) (channels, width, height)
-        self.layer_1 = torch.nn.Linear(28 * 28, 128)
-        self.layer_2 = torch.nn.Linear(128, 256)
-        self.layer_3 = torch.nn.Linear(256, 10)
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
 
-    def forward(self, x):
-        batch_size, channels, width, height = x.size()
+    @classmethod
+    def export(cls, name):
+        def export_helper(plugin):
+            cls._models[name] = plugin
+            return plugin
 
-        # (b, 1, 28, 28) -> (b, 1*28*28)
-        x = x.view(batch_size, -1)
-        x = self.layer_1(x)
-        x = F.relu(x)
-        x = self.layer_2(x)
-        x = F.relu(x)
-        x = self.layer_3(x)
+        return export_helper
 
-        x = F.log_softmax(x, dim=1)
-        return x
+    @classmethod
+    def add_args(cls, parent_parser):
+        parser = argparse.ArgumentParser(parents=[parent_parser], add_help=False)
 
+        parser.add_argument("-m", "--model", help="Model that should be trained")
+        for model, c in cls._models.items():
+            add_args = getattr(c, "add_args", None)
+            if callable(add_args):
+                parser = add_args(parser)
+        return parser
+
+    def list_models(self):
+        return self._models
+
+    def build_model(self, name, **kwargs):
+
+        assert name in self._models, f"Model {name} is unknown"
+        return self._models[name](**kwargs)

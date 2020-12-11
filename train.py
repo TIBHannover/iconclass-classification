@@ -62,10 +62,10 @@ def main():
         args, callbacks=callbacks, logger=logger, checkpoint_callback=checkpoint_callback,
     )
 
-    for x in dataset.train():
-        # print(x)
+    # for x in dataset.train():
+    #     print(x)
 
-        exit()
+    #     exit()
     trainer.fit(model, train_dataloader=dataset.train(), val_dataloaders=dataset.val())
 
     return 0

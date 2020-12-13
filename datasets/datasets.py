@@ -17,11 +17,16 @@ class DatasetsManager:
 
     @classmethod
     def add_args(cls, parent_parser):
-        parser = argparse.ArgumentParser(parents=[parent_parser], add_help=False)
+        parser = argparse.ArgumentParser(parents=[parent_parser], add_help=False, conflict_handler="resolve")
 
         parser.add_argument("-d", "--dataset", help="Dasaset to be loaded")
+
+        args, _ = parser.parse_known_args()
         for dataset, c in cls._datasets.items():
+            if dataset != args.dataset:
+                continue
             add_args = getattr(c, "add_args", None)
+
             if callable(add_args):
                 parser = add_args(parser)
         return parser

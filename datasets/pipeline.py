@@ -421,6 +421,27 @@ class MergePipeline(Pipeline):
         return Merger()
 
 
+class ConcatPipeline(Pipeline):
+    def __init__(self, pipelines):
+        super(ConcatPipeline, self).__init__()
+        self.pipelines = pipelines
+
+    def call(self, datasets=None, **kwargs):
+
+        pls = [pl(datasets) for pl in self.pipelines]
+
+        class Concat(Dataset):
+            def __iter__(self):
+                for pl in pls:
+                    for sample in pl:
+                        yield sample
+
+            def __len__(self):
+                return sum([len(d) for d in pls])
+
+        return Concat()
+
+
 class ConcatShufflePipeline(Pipeline):
     def __init__(self, pipelines, target_dist=None, drop_last=True):
         super(ConcatShufflePipeline, self).__init__()

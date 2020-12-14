@@ -8,7 +8,6 @@ from torchvision.models import resnet50, resnet152, densenet161
 from models.models import ModelsManager
 
 from models.resnet import ResNet50
-from models.attention import BahdanauAttention
 
 from datasets.utils import read_jsonl
 

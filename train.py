@@ -9,7 +9,7 @@ import pytorch_lightning as pl
 from pytorch_lightning.loggers import TensorBoardLogger
 import torch
 
-from callbacks import ModelCheckpoint, ProgressPrinter  # , LogImageCallback
+from callbacks import ModelCheckpoint, ProgressPrinter, LogImageCallback  # , LogImageCallback
 from datasets import DatasetsManager
 from models import ModelsManager
 
@@ -39,6 +39,8 @@ def main():
     if args.verbose:
         level = logging.INFO
 
+    logging.basicConfig(format="%(asctime)s %(levelname)s: %(message)s", datefmt="%d-%m-%Y %H:%M:%S", level=level)
+
     dataset = DatasetsManager().build_dataset(name=args.dataset, args=args)
 
     model = ModelsManager().build_model(name=args.model, args=args)
@@ -51,17 +53,18 @@ def main():
 
     callbacks = [
         ProgressPrinter(refresh_rate=args.progress_refresh_rate),
-        # pl.callbacks.lr_logger.LearningRateLogger(),
-        # LogImageCallback(args.log_save_interval),
+        pl.callbacks.LearningRateMonitor(),
+        LogImageCallback(),
     ]
 
     checkpoint_callback = ModelCheckpoint(
         checkpoint_save_interval=args.checkpoint_save_interval,
-        filepath=os.path.join(args.output_path, "model_{global_step:06d}"),
+        dirpath=args.output_path,
+        filename="model_{global_step:06d}",
         save_top_k=-1,
         verbose=True,
         # monitor="val_loss",
-        period=0,
+        period=1,
     )
 
     trainer = pl.Trainer.from_argparse_args(

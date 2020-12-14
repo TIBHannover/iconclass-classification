@@ -17,10 +17,14 @@ class ModelsManager:
 
     @classmethod
     def add_args(cls, parent_parser):
-        parser = argparse.ArgumentParser(parents=[parent_parser], add_help=False)
+        parser = argparse.ArgumentParser(parents=[parent_parser], add_help=False, conflict_handler="resolve")
 
         parser.add_argument("-m", "--model", help="Model that should be trained")
+        args, _ = parser.parse_known_args()
+
         for model, c in cls._models.items():
+            if model != args.model:
+                continue
             add_args = getattr(c, "add_args", None)
             if callable(add_args):
                 parser = add_args(parser)

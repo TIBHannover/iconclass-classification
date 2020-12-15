@@ -4,7 +4,7 @@ import torch
 from torch.nn import functional as F
 from torch import nn
 from pytorch_lightning.core.lightning import LightningModule
-from torchvision.models import resnet50, resnet152, densenet161
+from torchvision.models import resnet50, resnet152, densenet161, inception_v3
 from models.models import ModelsManager
 
 from models.resnet import ResNet50
@@ -13,9 +13,9 @@ from datasets.utils import read_jsonl
 
 
 @ModelsManager.export("attn_lstm")
-class Attn_Lstm(LightningModule):
+class AttnLstm(LightningModule):
     def __init__(self, args=None, **kwargs):
-        super(Attn_Lstm, self).__init__()
+        super(AttnLstm, self).__init__()
         if args is not None:
             dict_args = vars(args)
             dict_args.update(kwargs)
@@ -42,11 +42,9 @@ class Attn_Lstm(LightningModule):
         self.embedding_dim = 128
         self.attention_dim = 64
         #self.max_vocab_size = max(self.vocabulary_size)
-        self.encoder = Encoder(network='resnet152', embedding_dim = 128, pretrained = True)
+        self.encoder = Encoder(network='resnet152', embedding_dim = self.embedding_dim, pretrained = True)
         self.encoder_dim = self.encoder.dim
-        self.decoder_dim = 128 #??????
-        self.decoder = Decoder( self.vocabulary_size, self.embedding_dim, self.attention_dim, self.embedding_dim, self.decoder_dim, self.max_vocab_size)
-        
+        self.decoder = Decoder( self.vocabulary_size, self.embedding_dim, self.attention_dim, self.embedding_dim, self.max_vocab_size)
         self.loss = torch.nn.BCEWithLogitsLoss(reduction="none")
 
     def forward(self, x):
@@ -57,18 +55,31 @@ class Attn_Lstm(LightningModule):
         image = batch["image"]
         source = batch["source_id_sequnce"]
         target = batch["target_vec"]
-        
+        # image = F.interpolate(image, size = (299,299), mode= 'bicubic', align_corners=False)
+        # print(image.shape)
         # forward image
         image_embedding = self.encoder(image)
-        print(image_embedding.shape)
+        # print('*********')
+        # print(image_embedding.shape)
         # return loss
         hidden = self.decoder.reset_state(image.shape[0]).to(image.device.index)
-        print(hidden.device)
+        # print(hidden.device)
         decoder_inp = torch.ones([image.shape[0],1],dtype=torch.int64).to(image.device.index)
-        predictions, hidden, _ = self.decoder(image_embedding, decoder_inp, hidden, 1)
-        print('#########################')
-        print(predictions.shape)
-        loss = self.loss(predictions,target[0])
+        # print('#########################')
+        # print(decoder_inp)
+        loss = 0
+        for i_lev in range(len(target)):    
+            predictions, hidden, _ = self.decoder(decoder_inp, image_embedding, hidden, i_lev)
+            # print('#########################')
+            # print(predictions.shape)
+            # print('#########################')
+            # print(hidden.shape)
+            loss += self.loss(predictions,target[i_lev])
+            decoder_inp = torch.tensor(target[i_lev]).to(torch.int64).to(image.device.index)
+        # print('#########################')
+        # print(predictions.shape)
+        total_loss = loss/len(target)
+                
         print(torch.mean(loss))
         return torch.mean(loss)
         
@@ -89,15 +100,14 @@ class Attn_Lstm(LightningModule):
         return parser
 
 class BahdanauAttention(nn.Module):
-    def __init__(self, encoder_dim, decoder_dim, attention_dim):
+    def __init__(self, encoder_dim,attention_dim):
         """
         encoder_dim: feature size of encoded images
         decoder_dim: size of decoder's RNN
-        attention_dim: size of the attention network
         """
         super(BahdanauAttention, self).__init__()
         self.w_enc = nn.Linear(encoder_dim, attention_dim)   # linear layer to transform encoded image
-        self.w_dec = nn.Linear(decoder_dim, attention_dim)   # linear layer to transform decoder's output 
+        self.w_dec = nn.Linear(attention_dim, attention_dim)   # linear layer to transform decoder's output 
         self.full_att = nn.Linear(attention_dim, 1)  # linear layer to calculate values to be softmax-ed
         self.tanh = nn.Tanh()
         self.softmax = nn.Softmax(dim=1)  # softmax layer to calculate weights
@@ -106,16 +116,19 @@ class BahdanauAttention(nn.Module):
         """
         Forward propagation.
         encoder_out: encoded images, a tensor of dimension (batch_size, num_channels, encoder_dim)
-        decoder_hidden: previous decoder output, a tensor of dimension (batch_size, decoder_dim)
-        attention weighted encoding, weights
         """
         decoder_hidden_with_time_axis = torch.unsqueeze(decoder_hidden, 1) #(batch_size, 1, decoder_dim)
-        # print(decoder_hidden_with_time_axis.shape)
-        # print(encoder_out.shape)
+        # print('decoder_hidden_with_time_axis.shape {}'.format(decoder_hidden_with_time_axis.shape))
+        # print('encoder_out.shape{}'.format(encoder_out.shape))
+        # print('hidden {}'.format(decoder_hidden.shape))
+        
         attention_hidden_layer = self.tanh(self.w_enc(encoder_out) + self.w_dec(decoder_hidden_with_time_axis))  # (batch_size,channel, attention_dim)
+        # print('score {}'.format(attention_hidden_layer.shape))
         attention_weights = self.softmax(self.full_att(attention_hidden_layer).squeeze(2))  # (batch_size, channels)
+        
         attention_weighted_encoding = (encoder_out * attention_weights.unsqueeze(2)).sum(dim=1)  # (batch_size, encoder_dim)
-
+        # print('context vector {}'.format(attention_weighted_encoding.shape))
+        # print('attntion weights {}'.format(attention_weights.shape))
         return attention_weighted_encoding, attention_weights
 
 class Encoder(nn.Module):
@@ -130,9 +143,13 @@ class Encoder(nn.Module):
             self.net = densenet161(pretrained=pretrained)
             self.net = nn.Sequential(*list(list(self.net.children())[0])[:-1])
             self.dim = 1920
-        else:
+        elif network == 'resnet50':
             self.net = resnet50(pretrained=pretrained)
             self.net = nn.Sequential(*list(self.net.features.children())[:-1])
+            self.dim = 2048
+        elif network == 'inceptionv3': # TODO:: fix the input dimension of images
+            self.net = inception_v3(pretrained = pretrained, progress = False)
+            self.net = nn.Sequential(*list(self.net.children())[:-1])
             self.dim = 2048
         self.embedding_dim = embedding_dim
         self._fc = nn.Linear(self.dim, self.embedding_dim) # Todo add layers 
@@ -145,9 +162,8 @@ class Encoder(nn.Module):
         return x
     
 class Decoder(nn.Module):
-    def __init__(self, vocabulary_size, embedding_dim, attention_dim,encoder_dim, decoder_dim, max_vocab_size, tf=False):
+    def __init__(self, vocabulary_size, embedding_dim, attention_dim,encoder_dim, max_vocab_size, tf=False):
         super(Decoder, self).__init__()
-        self.decoder_dim = decoder_dim
         self.attention_dim = attention_dim
         self.embedding = nn.ModuleList([nn.Embedding(max_vocab_size, embedding_dim) for x in range(len(vocabulary_size))])
         self.gru = nn.GRU(embedding_dim + encoder_dim, attention_dim, bias= True)
@@ -155,10 +171,10 @@ class Decoder(nn.Module):
         self.fc1 = nn.Linear(attention_dim, attention_dim)
         self.fc2 = nn.ModuleList([nn.Linear(attention_dim, attention_dim) for i in range(len(vocabulary_size))])
         self.fc3 = nn.ModuleList([nn.Linear(attention_dim, vocabulary_size[i]) for i in range(len(vocabulary_size))])
-        self.attention = BahdanauAttention(encoder_dim, decoder_dim, attention_dim)
+        self.attention = BahdanauAttention(encoder_dim, attention_dim)
         #Todo add drop out layers
     
-    def forward(self, encoder_out, decoder_inp, hidden, level):
+    def forward(self, x, encoder_out, hidden, level):
         """
         Forward propagation.
         encoder_out: encoded images, a tensor of dimension (batch_size, enc_image_size, enc_image_size, encoder_dim)
@@ -168,26 +184,33 @@ class Decoder(nn.Module):
         """
         context_vec, attention_weights = self.attention(encoder_out, hidden)
         
-        print(level)
+        # print(level)
+        print(x.shape)
         if level<9:
-            x = self.embedding[level-1](decoder_inp)
-        else:
-            x = self.embedding[7](decoder_inp)
+            x = self.embedding[level](x)
+        #else:??
+        #    x = self.embedding[7](decoder_inp)
         print(x.shape)
         print(context_vec.shape)
         x = torch.cat([context_vec.unsqueeze(1), x], dim=2)
-        print(x.shape)
-        output, state = self.gru(x.view(1, 8, 256))
+        print('before gru {}'.format(x.shape))
+        output, state = self.gru(x.permute(1, 0, 2))
+        # print('output after gru {}'.format(output.shape))
+        
+        output = output.permute(1, 0, 2)
+        state =  state.squeeze(0)
+        # print('state after gru {}'.format(state.shape))
         x = self.fc1(output)
         x = torch.reshape(x, (-1, x.size()[2]))
-        
+        # print('after gru reshape {}'.format(x.shape))
         if level<9 :
-            x = self.fc2[level-1](x)
-            x = self.fc3[level-1](x)
-        else:
-            x = self.fc2[7](x)
-            x = self.fc3[7](x)
+            x = self.fc2[level](x)
+            x = self.fc3[level](x)
+        #else:???
+        #    x = self.fc2[7](x)
+        #    x = self.fc3[7](x)
+        # print('output of decoder{}'.format(x.shape))
         return x, state, attention_weights
         
     def reset_state(self, batch_size):
-        return torch.zeros((batch_size, self.decoder_dim))
+        return torch.zeros((batch_size, self.attention_dim))

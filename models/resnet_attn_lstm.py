@@ -45,7 +45,7 @@ class AttnLstm(LightningModule):
         self.encoder = Encoder(network='resnet152', embedding_dim = self.embedding_dim, pretrained = True)
         self.encoder_dim = self.encoder.dim
         self.decoder = Decoder( self.vocabulary_size, self.embedding_dim, self.attention_dim, self.embedding_dim, self.max_vocab_size)
-        self.loss = torch.nn.BCEWithLogitsLoss(reduction="none")
+        self.loss = torch.nn.BCEWithLogitsLoss()
 
     def forward(self, x):
         
@@ -64,28 +64,84 @@ class AttnLstm(LightningModule):
         # return loss
         hidden = self.decoder.reset_state(image.shape[0]).to(image.device.index)
         # print(hidden.device)
+        
+        # Feed <START> to the model in the first layer 1==<START>
         decoder_inp = torch.ones([image.shape[0],1],dtype=torch.int64).to(image.device.index)
         # print('#########################')
         # print(decoder_inp)
         loss = 0
         for i_lev in range(len(target)):    
             predictions, hidden, _ = self.decoder(decoder_inp, image_embedding, hidden, i_lev)
-            # print('#########################')
-            # print(predictions.shape)
-            # print('#########################')
-            # print(hidden.shape)
+            #print('#########################')
+            #print(predictions.shape)
+            #print('#########################')
+            #print(target[i_lev].shape)
             loss += self.loss(predictions,target[i_lev])
-            decoder_inp = torch.tensor(target[i_lev]).to(torch.int64).to(image.device.index)
+            decoder_inp = torch.unsqueeze(source[i_lev], dim=1)
+            #print(decoder_inp.shape)
+            #decoder_inp = torch.tensor(target[i_lev]).to(torch.int64).to(image.device.index)
         # print('#########################')
         # print(predictions.shape)
         total_loss = loss/len(target)
                 
-        print(torch.mean(loss))
-        return torch.mean(loss)
+        #print(torch.mean(loss))
+        loss = total_loss
+        return {'loss':torch.mean(loss)}
+    
+    def training_step_end(self, outputs):
+        self.log('train/loss', outputs['loss'].mean(), prog_bar=True)
+        
+        return {'loss': outputs['loss'].mean()}
+    
+    
+    def validation_step(self, batch, batch_idx):
+        image = batch["image"]
+        source = batch["source_id_sequnce"]
+        target = batch["target_vec"]
+        # image = F.interpolate(image, size = (299,299), mode= 'bicubic', align_corners=False)
+        # print(image.shape)
+        # forward image
+        image_embedding = self.encoder(image)
+        # print('*********')
+        # print(image_embedding.shape)
+        # return loss
+        hidden = self.decoder.reset_state(image.shape[0]).to(image.device.index)
+        # print(hidden.device)
+        
+        # Feed <START> to the model in the first layer 1==<START>
+        decoder_inp = torch.ones([image.shape[0],1],dtype=torch.int64).to(image.device.index)
+        # print('#########################')
+        # print(decoder_inp)
+        loss = 0
+        for i_lev in range(len(target)):    
+            predictions, hidden, _ = self.decoder(decoder_inp, image_embedding, hidden, i_lev)
+
+            loss += self.loss(predictions,target[i_lev])
+            decoder_inp = torch.unsqueeze(source[i_lev], dim=1)
+
+            #decoder_inp = torch.tensor(target[i_lev]).to(torch.int64).to(image.device.index)
+        # print('#########################')
+        # print(predictions.shape)
+        total_loss = loss/len(target)
+                
+        return {'loss':torch.mean(loss)}
+    
+    def validation_epoch_end(self, outputs):
+
+        loss = 0.0
+        count = 0
+        for output in outputs:
+            loss += output["loss"]
+            count += 1
+
+        self.log('val/loss', loss / count, prog_bar=True)
+        return {
+            "loss": loss / count,
+        }
         
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(params=list(self.encoder.parameters())+ list(self.decoder.parameters()),
-        lr=0.001)
+        optimizer = torch.optim.AdamW(params=list(self.encoder.parameters())+ list(self.decoder.parameters()),
+        lr=0.001,weight_decay=0.01)
         return optimizer
         
     @classmethod
@@ -185,15 +241,15 @@ class Decoder(nn.Module):
         context_vec, attention_weights = self.attention(encoder_out, hidden)
         
         # print(level)
-        print(x.shape)
+        # print(x.shape)
         if level<9:
             x = self.embedding[level](x)
         #else:??
         #    x = self.embedding[7](decoder_inp)
-        print(x.shape)
-        print(context_vec.shape)
+        # print(x.shape)
+        # print(context_vec.shape)
         x = torch.cat([context_vec.unsqueeze(1), x], dim=2)
-        print('before gru {}'.format(x.shape))
+        # print('before gru {}'.format(x.shape))
         output, state = self.gru(x.permute(1, 0, 2))
         # print('output after gru {}'.format(output.shape))
         

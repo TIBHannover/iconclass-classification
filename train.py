@@ -52,7 +52,7 @@ def main():
         logger = None
 
     callbacks = [
-        ProgressPrinter(refresh_rate=args.progress_refresh_rate),
+        # ProgressPrinter(refresh_rate=args.progress_refresh_rate),
         #pl.callbacks.LearningRateMonitor(),
         LogImageCallback(),
     ]

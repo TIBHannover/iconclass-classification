@@ -1,2 +1,4 @@
 from datasets.datasets import DatasetsManager
-import datasets.iconclass
+import datasets.iconclass_sequence
+import datasets.iconclass_flatten
+import datasets.iconclass_yolo_flatten

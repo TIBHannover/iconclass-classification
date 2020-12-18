@@ -1,9 +1,9 @@
 import argparse
+import re
 
 import torch
 from torch.nn import functional as F
 from torch import nn
-import pytorch_lightning as pl
 from pytorch_lightning.core.lightning import LightningModule
 from torchvision.models import resnet50, resnet152, densenet161
 from models.models import ModelsManager
@@ -15,10 +15,10 @@ from datasets.utils import read_jsonl
 from models.utils import linear_rampup, cosine_rampdown
 
 
-@ModelsManager.export("convnet_flatten")
-class ConvnetFlatten(LightningModule):
+@ModelsManager.export("convnet_yolo_flatten")
+class ConvnetYoloFlatten(LightningModule):
     def __init__(self, args=None, **kwargs):
-        super(ConvnetFlatten, self).__init__()
+        super(ConvnetYoloFlatten, self).__init__()
         if args is not None:
             dict_args = vars(args)
             dict_args.update(kwargs)
@@ -40,6 +40,16 @@ class ConvnetFlatten(LightningModule):
         if self.classifier_path is not None:
             self.classifier = read_jsonl(self.classifier_path)
 
+        self.opt_lr = dict_args.get("opt_lr", None)
+        self.weight_decay = dict_args.get("weight_decay", None)
+        self.opt_type = dict_args.get("opt_type", None)
+        self.sched_type = dict_args.get("sched_type", None)
+        self.lr_rampup = dict_args.get("lr_rampup", None)
+        self.lr_init = dict_args.get("lr_init", None)
+        self.lr_rampdown = dict_args.get("lr_rampdown", None)
+        self.gamma = dict_args.get("gamma", None)
+        self.step_size = dict_args.get("step_size", None)
+
         if self.encode_model == "resnet152":
             self.net = resnet152(pretrained=self.pretrained)
             self.net = nn.Sequential(*list(self.net.children())[:-1])
@@ -56,7 +66,7 @@ class ConvnetFlatten(LightningModule):
         self.fc = torch.nn.Linear(self.dim, 1024)
         self.dropout2 = torch.nn.Dropout(0.5)
         self.classifier = torch.nn.Linear(1024, len(self.mapping))
-        self.loss = torch.nn.BCEWithLogitsLoss()
+        self.loss = torch.nn.BCEWithLogitsLoss(reduction="none")
 
     def forward(self, x):
         x = self.net(x)
@@ -64,45 +74,42 @@ class ConvnetFlatten(LightningModule):
         x = self.dropout1(x)
         x = self.fc(x)
         x = self.dropout2(x)
-
         x = F.relu(x)
         x = self.classifier(x)
         return x
 
     def training_step(self, batch, batch_idx):
         image = batch["image"]
-        target = batch["target"]
+        ids_vec = batch["ids_vec"]
+        cls_vec = batch["cls_vec"]
+        cls_ids_mask_vec = batch["cls_ids_mask_vec"]
 
         self.image = image
 
         logits = self(image)
 
-        loss = self.loss(logits, target)
+        loss = self.loss(logits, ids_vec) * cls_ids_mask_vec
+        loss = torch.sum(loss) / torch.sum(cls_ids_mask_vec)
         return {"loss": loss}
-        # return {"loss": loss, "prediction": F.sigmoid(logits), "target": target}
 
     def training_step_end(self, outputs):
 
         self.log("train/loss", outputs["loss"].mean(), prog_bar=True)
+
         return {
             "loss": outputs["loss"].mean(),
-            # "progress_bar": {"train/loss": outputs["loss"].mean(),},
-            # "log": {"train/loss": outputs["loss"].mean(),},
         }
 
     def validation_step(self, batch, batch_idx):
         image = batch["image"]
-        target = batch["target"]
+        ids_vec = batch["ids_vec"]
+        cls_vec = batch["cls_vec"]
+        cls_ids_mask_vec = batch["cls_ids_mask_vec"]
         logits = self(image)
 
-        loss = self.loss(logits, target)
-
+        loss = self.loss(logits, ids_vec) * cls_ids_mask_vec
+        loss = torch.sum(loss) / torch.sum(cls_ids_mask_vec)
         return {"loss": loss}
-        # return {"loss": loss, "prediction": torch.sigmoid(logits), "target": target}
-
-    # def validation_step_end(self, outputs):
-    #     ap = self.map_metric.update(outputs["prediction"], outputs["target"])
-    #     return {**outputs, "ap": ap}
 
     def validation_epoch_end(self, outputs):
 
@@ -111,11 +118,10 @@ class ConvnetFlatten(LightningModule):
         for output in outputs:
             loss += output["loss"]
             count += 1
+
         self.log("val/loss", loss / count, prog_bar=True)
         return {
             "loss": loss / count,
-            # "progress_bar": {"val/loss": loss / count,},
-            # "log": {"val/loss": loss / count,},
         }
 
     def configure_optimizers(self):
@@ -201,3 +207,32 @@ class ConvnetFlatten(LightningModule):
         parser.add_argument("--step_size", default=10000, type=int)
 
         return parser
+
+
+#         @config_add_options("optimizer")
+# def config_optimizer():
+#     return {
+#         "type": ConfigEntry(choices=["SGD", "LARS"], default="LARS"),
+#         "lr": ConfigEntry(default=0.2, type=float),  # learning rate for encoder if fine-tuning
+#         "weight_decay": ConfigEntry(default=1.5e-6, type=float),
+#         "parameterwise": ConfigEntry(
+#             default=json.dumps(
+#                 {
+#                     "(bn|gn)(\d+)?.(weight|bias)": dict(weight_decay=0.0, lars_exclude=True),
+#                     "bias": dict(weight_decay=0.0, lars_exclude=True),
+#                 }
+#             )
+#         ),
+#     }
+
+
+# @config_add_options("scheduler")
+# def config_scheduler():
+#     return {
+#         "type": ConfigEntry(choices=["cosine", "exponetial"], default="cosine"),
+#         "lr_rampup": ConfigEntry(default=10000, type=float),
+#         "lr_init": ConfigEntry(default=0.0, type=float),
+#         "lr_rampdown": ConfigEntry(default=200000, type=float),
+#         "gamma": ConfigEntry(default=0.5, type=float),
+#         "step_size": ConfigEntry(default=10000, type=int),
+#     }

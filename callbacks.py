@@ -60,11 +60,6 @@ class ModelCheckpoint(pl.callbacks.ModelCheckpoint):
         self.trainer = trainer
         super().on_validation_end(trainer, pl_module)
 
-    def format_checkpoint_name(self, epoch, ckpt_name_metrics, **kwargs):
-        ckpt_name_metrics.update({"global_step": self.trainer.global_step + 1})
-
-        return super().format_checkpoint_name(epoch, ckpt_name_metrics, **kwargs).replace("global_step=", "")
-
     def save_checkpoint(self, trainer, pl_module):
         # print("SAFE")
 

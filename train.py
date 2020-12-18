@@ -23,10 +23,10 @@ def parse_args():
     parser.add_argument("--progress_refresh_rate", type=int, default=100, help="verbose output")
     parser.add_argument("--checkpoint_save_interval", type=int, default=100, help="verbose output")
 
+    parser = pl.Trainer.add_argparse_args(parser)
     parser = DatasetsManager.add_args(parser)
     parser = ModelsManager.add_args(parser)
 
-    parser = pl.Trainer.add_argparse_args(parser)
     args = parser.parse_args()
 
     return args
@@ -52,15 +52,15 @@ def main():
         logger = None
 
     callbacks = [
-        # ProgressPrinter(refresh_rate=args.progress_refresh_rate),
-        #pl.callbacks.LearningRateMonitor(),
+        ProgressPrinter(refresh_rate=args.progress_refresh_rate),
+        # pl.callbacks.LearningRateMonitor(),
         LogImageCallback(),
     ]
 
     checkpoint_callback = ModelCheckpoint(
         checkpoint_save_interval=args.checkpoint_save_interval,
         dirpath=args.output_path,
-        filename="model_{global_step:06d}",
+        filename="model_{step:06d}",
         save_top_k=-1,
         verbose=True,
         # monitor="val_loss",

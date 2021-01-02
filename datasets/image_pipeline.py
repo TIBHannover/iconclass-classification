@@ -16,13 +16,16 @@ class ImagePreprocessingPipeline(Pipeline):
             if self.sample_additional is not None:
                 if "additional" not in sample:
                     return None
+                if len(sample["additional"]) == 0:
+                    return None
                 if isinstance(self.sample_additional, float):
                     prob = self.sample_additional
                 else:
                     prob = 0.5
 
                 if random.random() < prob:
-                    image = np.asarray(imageio.imread(random.choice(sample["additional"])))
+                    # print(random.choice(sample["additional"]).keys())
+                    image = np.asarray(imageio.imread(random.choice(sample["additional"])[b"image"]))
                 else:
                     image = np.asarray(imageio.imread(sample["image_data"]))
 
@@ -32,6 +35,7 @@ class ImagePreprocessingPipeline(Pipeline):
             if self.min_size is not None and self.min_size > 0:
 
                 if image.shape[0] < self.min_size or image.shape[1] < self.min_size:
+
                     return None
 
             if "additional" in sample:

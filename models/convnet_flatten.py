@@ -1,3 +1,4 @@
+import re
 import argparse
 
 import torch
@@ -29,6 +30,16 @@ class ConvnetFlatten(LightningModule):
 
         self.encode_model = dict_args.get("encode_model", None)
         self.pretrained = dict_args.get("pretrained", None)
+
+        self.opt_lr = dict_args.get("opt_lr", None)
+        self.weight_decay = dict_args.get("weight_decay", None)
+        self.opt_type = dict_args.get("opt_type", None)
+        self.sched_type = dict_args.get("sched_type", None)
+        self.lr_rampup = dict_args.get("lr_rampup", None)
+        self.lr_init = dict_args.get("lr_init", None)
+        self.lr_rampdown = dict_args.get("lr_rampdown", None)
+        self.gamma = dict_args.get("gamma", None)
+        self.step_size = dict_args.get("step_size", None)
 
         self.mapping_path = dict_args.get("mapping_path", None)
         self.classifier_path = dict_args.get("classifier_path", None)

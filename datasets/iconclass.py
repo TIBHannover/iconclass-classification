@@ -26,28 +26,28 @@ class IconclassDecoderPipeline(Pipeline):
     def call(self, datasets=None, **kwargs):
         def decode(sample):
 
-            sample = {
+            out_sample = {
                 "image_data": sample[b"image"],
                 "id": sample[b"id"].decode("utf-8"),
                 "path": sample[b"path"].decode("utf-8"),
             }
 
             if b"additional" in sample:
-                sample.update({"additional": sample[b"additional"]})
+                out_sample.update({"additional": sample[b"additional"]})
 
-            if sample["id"] not in self.annotation:
-                logging.info(f"Dataset: {sample['id']} not in annotation")
+            if out_sample["id"] not in self.annotation:
+                logging.info(f"Dataset: {out_sample['id']} not in annotation")
                 return None
             else:
-                anno = self.annotation[sample["id"]]
+                anno = self.annotation[out_sample["id"]]
 
-            return {**sample, **anno}
+            return {**out_sample, **anno}
 
         return MapDataset(datasets, map_fn=decode)
 
 
-@DatasetsManager.export("iconclass_flatten")
-class IconClassFlattenDataloader:
+@DatasetsManager.export("iconclass")
+class IconclassDataloader:
     def __init__(self, args=None, **kwargs):
         if args is not None:
             dict_args = vars(args)
@@ -61,7 +61,7 @@ class IconClassFlattenDataloader:
         self.train_filter_min_dim = dict_args.get("train_filter_min_dim", None)
         self.train_sample_additional = dict_args.get("train_sample_additional", None)
 
-        self.val_path = dict_args.get("val_path", None)
+        self.val_path = [dict_args.get("val_path", None)]
         self.val_annotation_path = dict_args.get("val_annotation_path", None)
         self.val_filter_min_dim = dict_args.get("val_filter_min_dim", None)
 
@@ -115,7 +115,7 @@ class IconClassFlattenDataloader:
         )
         return dataloader
 
-    def val_image_pipeline():
+    def val_image_pipeline(self):
         transforms = torchvision.transforms.Compose(
             [
                 torchvision.transforms.ToPILImage(),
@@ -158,6 +158,7 @@ class IconClassFlattenDataloader:
         parser.add_argument("--train_sample_additional", type=float)
 
         parser.add_argument("--num_workers", type=int, default=8)
+        parser.add_argument("--batch_size", type=int, default=8)
 
         parser.add_argument("--val_path", type=str)
         parser.add_argument("--val_annotation_path", type=str)

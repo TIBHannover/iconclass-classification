@@ -13,7 +13,7 @@ import torchvision
 
 import multiprocessing as mp
 
-import cv2
+# import cv2
 import imageio
 import json
 import time
@@ -262,6 +262,14 @@ class MapPipeline(Pipeline):
 
     def call(self, datasets=None, **kwargs):
         return MapDataset(datasets, self.map_fn)
+
+
+class DummyPipeline(Pipeline):
+    def __init__(self):
+        def dummy(x):
+            return x
+
+        super(MapPipeline, self).__init__(map_fn=dummy)
 
 
 class SamplerDataset(Dataset):

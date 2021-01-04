@@ -9,13 +9,14 @@ from models.models import ModelsManager
 
 from models.resnet import ResNet50
 
+from models.base_model import BaseModel
 from datasets.utils import read_jsonl
 
 
-@ModelsManager.export("attn_lstm")
-class AttnLstm(LightningModule):
+@ModelsManager.export("convnet_attn_lstm")
+class ConvnetAttnLstm(BaseModel):
     def __init__(self, args=None, **kwargs):
-        super(AttnLstm, self).__init__()
+        super(ConvnetAttnLstm, self).__init__(args, **kwargs)
         if args is not None:
             dict_args = vars(args)
             dict_args.update(kwargs)
@@ -27,13 +28,13 @@ class AttnLstm(LightningModule):
 
         self.mapping_path = dict_args.get("mapping_path", None)
         self.classifier_path = dict_args.get("classifier_path", None)
-        self.mapping = {}
+        self.mapping_config = {}
         if self.mapping_path is not None:
-            self.mapping = read_jsonl(self.mapping_path, dict_key="id")
+            self.mapping_config = read_jsonl(self.mapping_path, dict_key="id")
 
-        self.classifier = {}
+        self.classifier_config = {}
         if self.classifier_path is not None:
-            self.classifier = read_jsonl(self.classifier_path)
+            self.classifier_config = read_jsonl(self.classifier_path)
 
         self.max_level = len(self.classifier)
 
@@ -125,8 +126,6 @@ class AttnLstm(LightningModule):
         # print(predictions.shape)
         total_loss = loss / len(target)
 
-        return {"loss": torch.mean(loss)}
-
     def validation_epoch_end(self, outputs):
 
         loss = 0.0
@@ -140,14 +139,174 @@ class AttnLstm(LightningModule):
             "loss": loss / count,
         }
 
-    def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(
-            params=list(self.encoder.parameters()) + list(self.decoder.parameters()), lr=0.001, weight_decay=0.01
+    def test_step(self, batch, batch_idx):
+
+        hypotheses = []
+
+        k = 3  # self.params.test.beam_size
+
+        image_embedding = self(batch["image"])
+        scores, caps_sorted, decode_lengths, alphas, sort_ind = self.decoder(
+            image_embedding,
+            batch["sequence"].to(image_embedding.device),
+            torch.sum(batch["sequence_mask"], dim=1).to(image_embedding.device),
+            device=batch["image"].device.index,
         )
-        return optimizer
+
+        targets = caps_sorted[:, 1:]
+        scores = pack_padded_sequence(scores, decode_lengths, batch_first=True).data
+        targets = pack_padded_sequence(targets, decode_lengths, batch_first=True).data
+        loss = F.cross_entropy(scores, targets)
+        perplexity = torch.exp(loss).detach().cpu().numpy()
+
+        loss = loss.detach().cpu().numpy()
+
+        #
+        enc_image_size = image_embedding.size(1)
+        encoder_dim = image_embedding.size(3)
+
+        # Flatten encoding
+        image_embedding = image_embedding.view(1, -1, encoder_dim)  # (1, num_pixels, encoder_dim)
+        num_pixels = image_embedding.size(1)
+
+        # We'll treat the problem as having a batch size of k
+        image_embedding = image_embedding.expand(k, num_pixels, encoder_dim)  # (k, num_pixels, encoder_dim)
+
+        # Tensor to store top k previous words at each step; now they're just <start>
+        k_prev_words = torch.LongTensor([[self.dictionary["<start>"]]] * k).cuda(batch["image"].device.index)  # (k, 1)
+
+        # Tensor to store top k sequences; now they're just <start>
+        seqs = k_prev_words  # (k, 1)
+
+        # Tensor to store top k sequences' scores; now they're just 0
+        top_k_scores = torch.zeros(k, 1).cuda(batch["image"].device.index)  # (k, 1)
+
+        # Lists to store completed sequences and scores
+        complete_seqs = list()
+        complete_seqs_scores = list()
+
+        # Start decoding
+        step = 1
+        h, c = self.decoder.init_hidden_state(image_embedding)
+
+        # s is a number less than or equal to k, because sequences are removed from this process once they hit <end>
+        while True:
+
+            embeddings = self.decoder.embedding(k_prev_words).squeeze(1)  # (s, embed_dim)
+
+            awe, _ = self.decoder.attention(image_embedding, h)  # (s, encoder_dim), (s, num_pixels)
+
+            gate = self.decoder.sigmoid(self.decoder.f_beta(h))  # gating scalar, (s, encoder_dim)
+            awe = gate * awe
+
+            h, c = self.decoder.decode_step(torch.cat([embeddings, awe], dim=1), (h, c))  # (s, decoder_dim)
+
+            scores = self.decoder.fc(h)  # (s, vocab_size)
+            scores = F.log_softmax(scores, dim=1)
+            # print(scores)
+            # Add
+            scores = top_k_scores.expand_as(scores) + scores  # (s, vocab_size)
+
+            # For the first step, all k points will have the same scores (since same k previous words, h, c)
+            if step == 1:
+                top_k_scores, top_k_words = scores[0].topk(k, 0, True, True)  # (s)
+            else:
+                # Unroll and find top scores, and their unrolled indices
+                top_k_scores, top_k_words = scores.view(-1).topk(k, 0, True, True)  # (s)
+
+            # Convert unrolled indices to actual indices of scores
+            prev_word_inds = top_k_words // len(self.dictionary.keys())  # vocab_size  # (s)
+            next_word_inds = top_k_words % len(self.dictionary.keys())  # vocab_size  # (s)
+
+            # Add new words to sequences
+            seqs = torch.cat([seqs[prev_word_inds], next_word_inds.unsqueeze(1)], dim=1)  # (s, step+1)
+
+            # Which sequences are incomplete (didn't reach <end>)?
+            incomplete_inds = [
+                ind for ind, next_word in enumerate(next_word_inds) if next_word != self.dictionary["<end>"]
+            ]
+            complete_inds = list(set(range(len(next_word_inds))) - set(incomplete_inds))
+
+            # Set aside complete sequences
+            if len(complete_inds) > 0:
+                complete_seqs.extend(seqs[complete_inds].tolist())
+                complete_seqs_scores.extend(top_k_scores[complete_inds])
+            k -= len(complete_inds)  # reduce beam length accordingly
+
+            # Proceed with incomplete sequences
+            if k == 0:
+                break
+            seqs = seqs[incomplete_inds]
+            h = h[prev_word_inds[incomplete_inds]]
+            c = c[prev_word_inds[incomplete_inds]]
+            image_embedding = image_embedding[prev_word_inds[incomplete_inds]]
+            top_k_scores = top_k_scores[incomplete_inds].unsqueeze(1)
+            k_prev_words = next_word_inds[incomplete_inds].unsqueeze(1)
+            # print(top_k_scores)
+            # Break if things have been going on too long
+            if step > 500:
+                break
+            step += 1
+
+        if len(complete_seqs_scores) == 0:
+            seq = seqs[0].tolist()
+        else:
+            i = complete_seqs_scores.index(max(complete_seqs_scores))
+            seq = complete_seqs[i]
+
+        # # References
+        # img_caps = allcaps[0].tolist()
+        # img_captions = list(
+        #     map(lambda c: [w for w in c if w not in {self.dictionary['<start>'], self.dictionary['<end>'], self.dictionary['<pad>']}],
+        #         img_caps))  # remove <start> and pads
+        # references.append(img_captions)
+
+        # Hypotheses
+
+        result_idx = [
+            w for w in seq if w not in {self.dictionary["<start>"], self.dictionary["<end>"], self.dictionary["<pad>"]}
+        ]
+        result_str = [self.inv_dictionary[w] for w in result_idx]
+
+        gt = batch["sequence"].squeeze(0).cpu().numpy().tolist()
+
+        gt_idx = [
+            w for w in gt if w not in {self.dictionary["<start>"], self.dictionary["<end>"], self.dictionary["<pad>"]}
+        ]
+        gt_str = [self.inv_dictionary[w] for w in gt_idx]
+
+        # print("########")
+        # print(gt_str)
+        # print(result_str)
+        # if self.params.test.prediction_output_path is not None:
+        #     image_out = os.path.join(self.params.test.prediction_output_path, "img")
+        #     gt_out = os.path.join(self.params.test.prediction_output_path, "gt")
+        #     res_out = os.path.join(self.params.test.prediction_output_path, "res")
+
+        #     os.makedirs(image_out, exist_ok=True)
+        #     os.makedirs(gt_out, exist_ok=True)
+        #     os.makedirs(res_out, exist_ok=True)
+
+        #     filename = os.path.splitext(os.path.basename(batch["path"][0]))[0]
+
+        #     with open(os.path.join(gt_out, f"{filename}.tex"), "w") as f:
+        #         f.write("$" + " ".join(gt_str) + "$\n")
+
+        #     with open(os.path.join(res_out, f"{filename}.tex"), "w") as f:
+        #         f.write("$" + " ".join(result_str) + "$\n")
+
+        #     imageio.imwrite(
+        #         os.path.join(image_out, f"{filename}.jpg"), batch["image"].squeeze(0).squeeze(0).cpu().numpy()
+        #     )
+
+        return {"loss": loss, "perplexity": perplexity, "gt_str": gt_str, "pred_str": result_str}
+
+    def parameters(self):
+        return list(self.encoder.parameters()) + list(self.decoder.parameters())
 
     @classmethod
     def add_args(cls, parent_parser):
+        parent_parser = super().add_args(parent_parser)
         parser = argparse.ArgumentParser(parents=[parent_parser], add_help=False, conflict_handler="resolve")
         # args, _ = parser.parse_known_args()
         # if "classifier_path" not in args:

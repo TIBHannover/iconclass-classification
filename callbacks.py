@@ -2,6 +2,7 @@ import torch
 import logging
 
 import torch
+import numpy as np
 import copy
 import pytorch_lightning as pl
 import torchvision
@@ -32,9 +33,15 @@ class ProgressPrinter(pl.callbacks.ProgressBarBase):
             progress_bar_dict = copy.deepcopy(trainer.progress_bar_dict)
 
             progress_bar_dict.pop("v_num", None)
-            logging.info(
-                f"Train {self.trainer.global_step} " + " ".join([f"{k}:{v}" for k, v in progress_bar_dict.items()])
-            )
+
+            log_parts = []
+            for k, v in progress_bar_dict.items():
+                if isinstance(v, (float, np.float32)):
+                    log_parts.append(f"{k}:{v:.2E}")
+                else:
+                    log_parts.append(f"{k}:{v}")
+
+            logging.info(f"Train {self.trainer.global_step} " + " ".join(log_parts))
 
     def on_validation_end(self, trainer, pl_module):
         super().on_validation_end(trainer, pl_module)
@@ -43,9 +50,16 @@ class ProgressPrinter(pl.callbacks.ProgressBarBase):
         progress_bar_dict = copy.deepcopy(trainer.progress_bar_dict)
 
         progress_bar_dict.pop("v_num", None)
-        logging.info(
-            f"Val {self.trainer.global_step+1} " + " ".join([f"{k}:{v}" for k, v in progress_bar_dict.items()])
-        )
+
+        log_parts = []
+        for k, v in progress_bar_dict.items():
+
+            if isinstance(v, (float, np.float32)):
+                log_parts.append(f"{k}:{v:.2E}")
+            else:
+                log_parts.append(f"{k}:{v}")
+
+        logging.info(f"Val {self.trainer.global_step+1} " + " ".join(log_parts))
 
 
 class ModelCheckpoint(pl.callbacks.ModelCheckpoint):

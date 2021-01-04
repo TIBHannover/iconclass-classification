@@ -1,24 +1,25 @@
 import argparse
 import re
 
+import numpy as np
 import torch
 from torch.nn import functional as F
 from torch import nn
+import pytorch_lightning as pl
 from pytorch_lightning.core.lightning import LightningModule
 from torchvision.models import resnet50, resnet152, densenet161
 from models.models import ModelsManager
 
-from models.resnet import ResNet50
 
 from datasets.utils import read_jsonl
 
-from models.utils import linear_rampup, cosine_rampdown
+from models.base_model import BaseModel
 
 
 @ModelsManager.export("convnet_yolo_flatten")
-class ConvnetYoloFlatten(LightningModule):
+class ConvnetYoloFlatten(BaseModel):
     def __init__(self, args=None, **kwargs):
-        super(ConvnetYoloFlatten, self).__init__()
+        super(ConvnetYoloFlatten, self).__init__(args, **kwargs)
         if args is not None:
             dict_args = vars(args)
             dict_args.update(kwargs)
@@ -32,23 +33,13 @@ class ConvnetYoloFlatten(LightningModule):
 
         self.mapping_path = dict_args.get("mapping_path", None)
         self.classifier_path = dict_args.get("classifier_path", None)
-        self.mapping = {}
+        self.mapping_config = {}
         if self.mapping_path is not None:
-            self.mapping = read_jsonl(self.mapping_path, dict_key="id")
+            self.mapping_config = read_jsonl(self.mapping_path, dict_key="id")
 
-        self.classifier = {}
+        self.classifier_config = {}
         if self.classifier_path is not None:
-            self.classifier = read_jsonl(self.classifier_path)
-
-        self.opt_lr = dict_args.get("opt_lr", None)
-        self.weight_decay = dict_args.get("weight_decay", None)
-        self.opt_type = dict_args.get("opt_type", None)
-        self.sched_type = dict_args.get("sched_type", None)
-        self.lr_rampup = dict_args.get("lr_rampup", None)
-        self.lr_init = dict_args.get("lr_init", None)
-        self.lr_rampdown = dict_args.get("lr_rampdown", None)
-        self.gamma = dict_args.get("gamma", None)
-        self.step_size = dict_args.get("step_size", None)
+            self.classifier_config = read_jsonl(self.classifier_path)
 
         if self.encode_model == "resnet152":
             self.net = resnet152(pretrained=self.pretrained)
@@ -65,8 +56,10 @@ class ConvnetYoloFlatten(LightningModule):
         self.dropout1 = torch.nn.Dropout(0.5)
         self.fc = torch.nn.Linear(self.dim, 1024)
         self.dropout2 = torch.nn.Dropout(0.5)
-        self.classifier = torch.nn.Linear(1024, len(self.mapping))
+        self.classifier = torch.nn.Linear(1024, len(self.mapping_config))
         self.loss = torch.nn.BCEWithLogitsLoss(reduction="none")
+
+        self.f1_val = pl.metrics.classification.F1(num_classes=len(self.mapping_config), multilabel=True, average=None)
 
     def forward(self, x):
         x = self.net(x)
@@ -109,6 +102,9 @@ class ConvnetYoloFlatten(LightningModule):
 
         loss = self.loss(logits, ids_vec) * cls_ids_mask_vec
         loss = torch.sum(loss) / torch.sum(cls_ids_mask_vec)
+
+        self.f1_val(torch.sigmoid(logits), ids_vec)
+
         return {"loss": loss}
 
     def validation_epoch_end(self, outputs):
@@ -120,74 +116,22 @@ class ConvnetYoloFlatten(LightningModule):
             count += 1
 
         self.log("val/loss", loss / count, prog_bar=True)
-        return {
-            "loss": loss / count,
-        }
 
-    def configure_optimizers(self):
-        def build_optimizer(model, type, **kwargs):
-            parameterwise = {
-                "(bn|gn)(\d+)?.(weight|bias)": dict(weight_decay=0.0, lars_exclude=True),
-                "bias": dict(weight_decay=0.0, lars_exclude=True),
-            }
-            if parameterwise is None:
-                params = model.parameters()
+        f1_score = self.f1_val.compute().cpu().detach()
 
-            else:
-                params = []
-                for name, param in model.named_parameters():
-                    param_group = {"params": [param]}
-                    if not param.requires_grad:
-                        params.append(param_group)
-                        continue
+        self.log("val/f1", np.nanmean(f1_score), prog_bar=True)
 
-                    for regexp, options in parameterwise.items():
-                        if re.search(regexp, name):
-                            for key, value in options.items():
-                                param_group[key] = value
-
-                    # otherwise use the global settings
-                    params.append(param_group)
-            if type.lower() == "sgd":
-                return torch.optim.SGD(params=params, **kwargs)
-
-            if type.lower() == "adam":
-                return torch.optim.AdamW(params=params, **kwargs)
-
-        optimizer = build_optimizer(self, type=self.opt_type, lr=self.opt_lr, weight_decay=self.weight_decay)
-
-        if self.sched_type == "cosine":
-
-            def cosine_lr(step):
-                # epoch = step * batch_size / len(train_dataset)
-
-                r = linear_rampup(step, self.lr_rampup)
-                lr = r * (1.0 - self.lr_init) + self.lr_init
-
-                if self.lr_rampdown:
-                    lr *= cosine_rampdown(step, self.lr_rampdown)
-
-                return lr
-
-            lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, cosine_lr)
-        elif self.sched_type == "exponetial":
-
-            def exp_lr(step):
-                decayed_learning_rate = self.lr * self.gamma ** (step / 10000)
-                return decayed_learning_rate
-
-            lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, exp_lr)
-
-        # optimizer = torch.optim.SGD(
-        #     params=list(self.encoder.parameters()) + list(self.decoder.parameters()), lr=1.0, weight_decay=self.params.optimizer.weight_decay,momentum=0.9
-        # )
-        else:
-            return optimizer
-
-        return [optimizer], [{"scheduler": lr_scheduler, "interval": "step", "frequency": 1}]
+        level_results = {}
+        for i, x in enumerate(self.classifier_config):
+            if x["depth"] not in level_results:
+                level_results[x["depth"]] = []
+            level_results[x["depth"]].append(f1_score[x["range"][0] : x["range"][1]])
+        for depth, x in sorted(level_results.items(), key=lambda x: x[0]):
+            self.log(f"val/f1_{depth}", np.nanmean(torch.cat(x, dim=0)), prog_bar=True)
 
     @classmethod
     def add_args(cls, parent_parser):
+        parent_parser = super().add_args(parent_parser)
         parser = argparse.ArgumentParser(parents=[parent_parser], add_help=False, conflict_handler="resolve")
         # args, _ = parser.parse_known_args()
         # if "classifier_path" not in args:
@@ -195,44 +139,5 @@ class ConvnetYoloFlatten(LightningModule):
         parser.add_argument("--encode_model", type=str, default="resnet50")
         parser.add_argument("--mapping_path", type=str)
         parser.add_argument("--classifier_path", type=str)
-        parser.add_argument("--opt_lr", type=float, default=1e-3)
-        parser.add_argument("--weight_decay", type=float, default=1e-3)
-        parser.add_argument("--opt_type", choices=["SGD", "LARS", "ADAM"], default="ADAM")
-
-        parser.add_argument("--sched_type", choices=["cosine", "exponetial"])
-        parser.add_argument("--lr_rampup", default=10000, type=int)
-        parser.add_argument("--lr_init", default=0.0, type=float)
-        parser.add_argument("--lr_rampdown", default=60000, type=int)
-        parser.add_argument("--gamma", default=0.5, type=float)
-        parser.add_argument("--step_size", default=10000, type=int)
 
         return parser
-
-
-#         @config_add_options("optimizer")
-# def config_optimizer():
-#     return {
-#         "type": ConfigEntry(choices=["SGD", "LARS"], default="LARS"),
-#         "lr": ConfigEntry(default=0.2, type=float),  # learning rate for encoder if fine-tuning
-#         "weight_decay": ConfigEntry(default=1.5e-6, type=float),
-#         "parameterwise": ConfigEntry(
-#             default=json.dumps(
-#                 {
-#                     "(bn|gn)(\d+)?.(weight|bias)": dict(weight_decay=0.0, lars_exclude=True),
-#                     "bias": dict(weight_decay=0.0, lars_exclude=True),
-#                 }
-#             )
-#         ),
-#     }
-
-
-# @config_add_options("scheduler")
-# def config_scheduler():
-#     return {
-#         "type": ConfigEntry(choices=["cosine", "exponetial"], default="cosine"),
-#         "lr_rampup": ConfigEntry(default=10000, type=float),
-#         "lr_init": ConfigEntry(default=0.0, type=float),
-#         "lr_rampdown": ConfigEntry(default=200000, type=float),
-#         "gamma": ConfigEntry(default=0.5, type=float),
-#         "step_size": ConfigEntry(default=10000, type=int),
-#     }

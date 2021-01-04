@@ -25,29 +25,43 @@ def main():
     with open(args.mapping_path, "r") as f:
         for i, line in enumerate(f):
             d = json.loads(line)
-            data.append(
-                {"id": d["id"],}
-            )
+            parents = d["p"]
+            data.append({"id": d["id"], "parents": parents})
 
-    tokenizer_level = set()
+            if max_level < len(parents) + 1:
+                max_level = len(parents) + 1
+
+    tokenizer_level = [set() for x in range(max_level)]
 
     for d in data:
-        tokenizer_level.add(d["id"])
+        tokenizer_level[len(d["parents"])].add(d["id"])
 
-    # for i, t in enumerate(tokenizer_level):
-    #     t = list(sorted(t))
-    tokenizer_level = list(sorted(tokenizer_level))
+    tokenizer = []
+    tokenizer_level_list = []
+    for i, t in enumerate(tokenizer_level):
+        t = list(sorted(t))
+        tokenizer_level_list.append(t)
+
+        tokenizer.extend(t)
+
+    print(tokenizer[:20])
+    # tokenizer = list(sorted(tokenizer))
 
     if args.output_mapping_path is not None:
         with open(args.output_mapping_path, "w") as f:
             for d in data:
-                f.write(json.dumps({**d, "class_id": tokenizer_level.index(d["id"])}) + "\n")
+                f.write(json.dumps({"id": d["id"], "class_id": tokenizer.index(d["id"])}) + "\n")
 
     if args.output_classifier_path is not None:
 
         with open(args.output_classifier_path, "w") as f:
-            for i, t in enumerate([tokenizer_level]):
-                f.write(json.dumps({"index": i, "depth": i, "tokenizer": list(t)}) + "\n")
+            start = 0
+            for i, t in enumerate(tokenizer_level_list):
+                print(t[:5])
+                f.write(
+                    json.dumps({"index": i, "range": [start, start + len(t)], "depth": i, "tokenizer": list(t)}) + "\n"
+                )
+                start += len(t)
     return 0
 
 

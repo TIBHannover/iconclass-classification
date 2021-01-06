@@ -75,7 +75,6 @@ class BaseModel(LightningModule):
             if type.lower() == "adam":
                 return torch.optim.AdamW(params=params, **kwargs)
 
-        print(self.lr)
         optimizer = build_optimizer(self, type=self.opt_type, lr=self.lr, weight_decay=self.weight_decay)
 
         if self.sched_type == "cosine":
@@ -95,7 +94,7 @@ class BaseModel(LightningModule):
         elif self.sched_type == "exponetial":
 
             def exp_lr(step):
-                decayed_learning_rate = self.lr * self.gamma ** (step / self.step_size)
+                decayed_learning_rate = self.gamma ** (step / self.step_size)
                 return decayed_learning_rate
 
             lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, exp_lr)

@@ -11,18 +11,17 @@ import imageio
 from datasets.image_pipeline import ImagePreprocessingPipeline
 from datasets.datasets import DatasetsManager
 from datasets.pipeline import (
+    MapPipeline,
     Pipeline,
     MapDataset,
     MsgPackPipeline,
-    MapPipeline,
     SequencePipeline,
-    FilterPipeline,
     ConcatShufflePipeline,
-    RepeatPipeline,
-    ImagePipeline,
     ConcatPipeline,
 )
 from datasets.utils import read_jsonl
+
+from datasets.pad_collate import PadCollate
 
 
 class IconclassSequenceDecoderPipeline(Pipeline):
@@ -35,6 +34,7 @@ class IconclassSequenceDecoderPipeline(Pipeline):
         random_trace=None,
         last_trace=None,
         merge_one_hot=None,
+        pad_max_shape=None,
     ):
         self.num_classes = num_classes
         self.annotation = annotation
@@ -43,6 +43,7 @@ class IconclassSequenceDecoderPipeline(Pipeline):
         self.random_trace = random_trace
         self.last_trace = last_trace
         self.merge_one_hot = merge_one_hot
+        self.pad_max_shape = pad_max_shape
 
     def call(self, datasets=None, **kwargs):
         def decode(sample):
@@ -61,6 +62,9 @@ class IconclassSequenceDecoderPipeline(Pipeline):
                 return None
             else:
                 sample.update(self.annotation[sample["id"]])
+
+            classes_vec_max_length = max([len(x["tokenizer"]) for x in self.classifier])
+            pad_id = self.classifier[0]["tokenizer"].index("#PAD")
 
             classes_vec = []
             classes_sequences = []
@@ -134,6 +138,70 @@ class IconclassSequenceDecoderPipeline(Pipeline):
                     "source_id_sequnce": source_id_sequnce,
                     "target_vec": target_vec,
                 }
+            elif self.pad_max_shape:
+                # print(classes_vec_max_length)
+                source_id_sequnce_list = []
+                target_vec_list = []
+                mask = []
+                classes_vec_padded = []
+                for i, c in enumerate(classes_vec):
+                    classes_vec_padded_inter = []
+                    for j, k in enumerate(c):
+                        padded_classes = np.pad(k, [0, classes_vec_max_length - len(k)], constant_values=pad_id)
+                        classes_vec_padded_inter.append(padded_classes)
+
+                        # print("############")
+                        # print(len(k))
+                        # print(classes_vec_max_length - len(k))
+                        # print(len(padded_classes))
+                    classes_vec_padded.append(classes_vec_padded_inter)
+
+                classes_vec_padded = np.asarray(classes_vec_padded)
+                # print(classes_vec_padded.shape)
+                # exit()
+
+                for i, trace_class in enumerate(sample["classes"]):
+                    source_id_sequnce = classes_sequences[i]
+                    # print(classes_vec[i])
+                    target_vec = classes_vec_padded[i]
+                    # print("##########")
+                    # for x in target_vec:
+                    #     print(x.shape)
+                    # print("##########")
+                    target_vec = np.asarray(target_vec)
+
+                    # print(target_vec.shape)
+                    if self.merge_one_hot:
+                        target_vec[0] = np.amax(
+                            np.stack([classes_vec_padded[i][0] for i in range(len(classes_vec))]), axis=0
+                        )
+
+                        # merge one_hot traces until parent don't match
+                        for d, vec in enumerate(classes_vec_padded[i]):
+                            if d < 1:
+                                continue
+                            vecs_to_merged = []
+                            for i, seq in enumerate(classes_sequences):
+                                if seq[d - 1] == source_id_sequnce[d - 1]:
+                                    vecs_to_merged.append(classes_vec_padded[i][d])
+
+                            target_vec[d] = np.amax(np.stack(vecs_to_merged), axis=0)
+                    source_id_sequnce_list.append(source_id_sequnce)
+
+                    target_vec_list.append(np.asarray(target_vec))
+                    mask.append(1)
+                    # print(target_vec.shape)
+                # print(f"AAA {torch.tensor(np.asarray(mask, dtype=np.int8))}")
+                # print(f"BBB {torch.tensor(np.asarray(target_vec_list, dtype=np.int32))}")
+                # print(f"CCC {torch.tensor(np.asarray(source_id_sequnce_list, dtype=np.int32))}")
+                # exit()
+                sample = {
+                    "image_data": sample["image_data"],
+                    "id": sample["id"],
+                    "source_id_sequnce": torch.tensor(np.asarray(source_id_sequnce_list, dtype=np.int64)),
+                    "target_vec": torch.tensor(np.asarray(target_vec_list, dtype=np.float32)),
+                    "mask": torch.tensor(np.asarray(mask, dtype=np.int8)),
+                }
 
             return sample
 
@@ -157,6 +225,7 @@ class IconclassSequenceDataloader:
         self.val_path = dict_args.get("val_path", None)
         self.val_annotation_path = dict_args.get("val_annotation_path", None)
         self.val_last_trace = dict_args.get("val_last_trace", None)
+        self.val_pad_max_shape = dict_args.get("val_pad_max_shape", None)
 
         self.batch_size = dict_args.get("batch_size", None)
         self.num_workers = dict_args.get("num_workers", None)
@@ -181,6 +250,14 @@ class IconclassSequenceDataloader:
         self.classifier = {}
         if self.classifier_path is not None:
             self.classifier = read_jsonl(self.classifier_path)
+
+        self.pad_id = None
+        for classifier in self.classifier:
+            if self.pad_id is None:
+                self.pad_id = classifier["tokenizer"].index("#PAD")
+
+            if self.pad_id != classifier["tokenizer"].index("#PAD"):
+                assert False, "#PAD should always have the same index"
 
     def train(self):
         train_image_transform = torchvision.transforms.Compose(
@@ -209,7 +286,12 @@ class IconclassSequenceDataloader:
 
         pipeline = SequencePipeline(pipeline_stack)
         dataloader = torch.utils.data.DataLoader(
-            pipeline(), batch_size=self.batch_size, num_workers=self.num_workers, pin_memory=True
+            pipeline(),
+            batch_size=self.batch_size,
+            # num_workers=self.num_workers,
+            num_workers=1,
+            pin_memory=True,
+            collate_fn=PadCollate({"mask": 100, "source_id_sequnce": self.pad_id, "target_vec": self.pad_id}),
         )
         return dataloader
 
@@ -223,6 +305,10 @@ class IconclassSequenceDataloader:
             ]
         )
 
+        def debug_msg(x):
+            print(x)
+            return x
+
         pipeline_stack = [
             ConcatPipeline([MsgPackPipeline(path=p) for p in [self.val_path]]),
             IconclassSequenceDecoderPipeline(
@@ -231,13 +317,20 @@ class IconclassSequenceDataloader:
                 classifier=self.classifier,
                 last_trace=self.val_last_trace,
                 merge_one_hot=self.train_merge_one_hot,
+                pad_max_shape=self.val_pad_max_shape,
             ),
             ImagePreprocessingPipeline(val_image_transform),
+            # MapPipeline(debug_msg),
         ]
 
         pipeline = SequencePipeline(pipeline_stack)
         dataloader = torch.utils.data.DataLoader(
-            pipeline(), batch_size=self.batch_size, num_workers=self.num_workers, pin_memory=True
+            pipeline(),
+            batch_size=self.batch_size,
+            # num_workers=self.num_workers,
+            num_workers=1,
+            pin_memory=True,
+            collate_fn=PadCollate({"mask": 100, "source_id_sequnce": self.pad_id, "target_vec": self.pad_id}),
         )
         return dataloader
 
@@ -262,6 +355,7 @@ class IconclassSequenceDataloader:
         parser.add_argument("--val_path", type=str)
         parser.add_argument("--val_annotation_path", nargs="+", type=str)
         parser.add_argument("--val_last_trace", action="store_true")
+        parser.add_argument("--val_pad_max_shape", action="store_true")
 
         return parser
 

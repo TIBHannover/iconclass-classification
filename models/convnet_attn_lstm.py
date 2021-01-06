@@ -36,9 +36,9 @@ class ConvnetAttnLstm(BaseModel):
         if self.classifier_path is not None:
             self.classifier_config = read_jsonl(self.classifier_path)
 
-        self.max_level = len(self.classifier)
+        self.max_level = len(self.classifier_config)
 
-        self.vocabulary_size = [len(x["tokenizer"]) for x in self.classifier]  # get from tockenizer
+        self.vocabulary_size = [len(x["tokenizer"]) for x in self.classifier_config]  # get from tockenizer
         self.max_vocab_size = max(self.vocabulary_size)
         self.embedding_dim = 128
         self.attention_dim = 64
@@ -79,7 +79,7 @@ class ConvnetAttnLstm(BaseModel):
             # print(predictions.shape)
             # print('#########################')
             # print(target[i_lev].shape)
-            loss += self.loss(predictions, target[i_lev])
+            loss += torch.mean(self.loss(predictions, target[i_lev]))
             decoder_inp = torch.unsqueeze(source[i_lev], dim=1)
             # print(decoder_inp.shape)
             # decoder_inp = torch.tensor(target[i_lev]).to(torch.int64).to(image.device.index)
@@ -115,16 +115,37 @@ class ConvnetAttnLstm(BaseModel):
         # print('#########################')
         # print(decoder_inp)
         loss = 0
-        for i_lev in range(len(target)):
-            predictions, hidden, _ = self.decoder(decoder_inp, image_embedding, hidden, i_lev)
+        # Check if batch contains all traces (target [BATCH_SIZE, MAX_SEQUENCE, LEVEL, MAX_CLASSIFIER])
+        if "mask" in batch:
+            for i_lev in range(target.shape[2]):
+                predictions, hidden, _ = self.decoder(decoder_inp, image_embedding, hidden, i_lev)
+                # print("#######################")
+                # print(i_lev)
+                # print(predictions.shape)
+                # print(target[i_lev].shape)
+                prediction_size = len(self.classifier_config[i_lev]["tokenizer"])
 
-            loss += self.loss(predictions, target[i_lev])
-            decoder_inp = torch.unsqueeze(source[i_lev], dim=1)
+                target_lev = target[:, 0, i_lev, :prediction_size]
+                loss += torch.mean(self.loss(predictions, target_lev))
+                decoder_inp = torch.unsqueeze(source[:, 0, i_lev], dim=1)
+        # target is only a list
+        else:
+            for i_lev in range(len(target)):
+                predictions, hidden, _ = self.decoder(decoder_inp, image_embedding, hidden, i_lev)
+                # print('#########################')
+                # print(predictions.shape)
+                # print('#########################')
+                # print(target[i_lev].shape)
+                loss += torch.mean(self.loss(predictions, target[i_lev]))
+                decoder_inp = torch.unsqueeze(source[i_lev], dim=1)
 
             # decoder_inp = torch.tensor(target[i_lev]).to(torch.int64).to(image.device.index)
         # print('#########################')
         # print(predictions.shape)
-        total_loss = loss / len(target)
+        # total_loss = loss / len(target)
+        return {
+            "loss": loss,
+        }
 
     def validation_epoch_end(self, outputs):
 
@@ -135,9 +156,9 @@ class ConvnetAttnLstm(BaseModel):
             count += 1
 
         self.log("val/loss", loss / count, prog_bar=True)
-        return {
-            "loss": loss / count,
-        }
+        # return {
+        #     "loss": loss / count,
+        # }
 
     def test_step(self, batch, batch_idx):
 
@@ -300,9 +321,6 @@ class ConvnetAttnLstm(BaseModel):
         #     )
 
         return {"loss": loss, "perplexity": perplexity, "gt_str": gt_str, "pred_str": result_str}
-
-    def parameters(self):
-        return list(self.encoder.parameters()) + list(self.decoder.parameters())
 
     @classmethod
     def add_args(cls, parent_parser):

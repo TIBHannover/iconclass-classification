@@ -139,7 +139,6 @@ class IconclassSequenceDecoderPipeline(Pipeline):
                     "target_vec": target_vec,
                 }
             elif self.pad_max_shape:
-                # print(classes_vec_max_length)
                 source_id_sequnce_list = []
                 target_vec_list = []
                 mask = []
@@ -150,27 +149,16 @@ class IconclassSequenceDecoderPipeline(Pipeline):
                         padded_classes = np.pad(k, [0, classes_vec_max_length - len(k)], constant_values=pad_id)
                         classes_vec_padded_inter.append(padded_classes)
 
-                        # print("############")
-                        # print(len(k))
-                        # print(classes_vec_max_length - len(k))
-                        # print(len(padded_classes))
                     classes_vec_padded.append(classes_vec_padded_inter)
 
                 classes_vec_padded = np.asarray(classes_vec_padded)
-                # print(classes_vec_padded.shape)
-                # exit()
 
                 for i, trace_class in enumerate(sample["classes"]):
                     source_id_sequnce = classes_sequences[i]
-                    # print(classes_vec[i])
                     target_vec = classes_vec_padded[i]
-                    # print("##########")
-                    # for x in target_vec:
-                    #     print(x.shape)
-                    # print("##########")
+
                     target_vec = np.asarray(target_vec)
 
-                    # print(target_vec.shape)
                     if self.merge_one_hot:
                         target_vec[0] = np.amax(
                             np.stack([classes_vec_padded[i][0] for i in range(len(classes_vec))]), axis=0
@@ -190,11 +178,7 @@ class IconclassSequenceDecoderPipeline(Pipeline):
 
                     target_vec_list.append(np.asarray(target_vec))
                     mask.append(1)
-                    # print(target_vec.shape)
-                # print(f"AAA {torch.tensor(np.asarray(mask, dtype=np.int8))}")
-                # print(f"BBB {torch.tensor(np.asarray(target_vec_list, dtype=np.int32))}")
-                # print(f"CCC {torch.tensor(np.asarray(source_id_sequnce_list, dtype=np.int32))}")
-                # exit()
+
                 sample = {
                     "image_data": sample["image_data"],
                     "id": sample["id"],
@@ -288,8 +272,7 @@ class IconclassSequenceDataloader:
         dataloader = torch.utils.data.DataLoader(
             pipeline(),
             batch_size=self.batch_size,
-            # num_workers=self.num_workers,
-            num_workers=1,
+            num_workers=self.num_workers,
             pin_memory=True,
             collate_fn=PadCollate({"mask": 100, "source_id_sequnce": self.pad_id, "target_vec": self.pad_id}),
         )
@@ -305,10 +288,6 @@ class IconclassSequenceDataloader:
             ]
         )
 
-        def debug_msg(x):
-            print(x)
-            return x
-
         pipeline_stack = [
             ConcatPipeline([MsgPackPipeline(path=p) for p in [self.val_path]]),
             IconclassSequenceDecoderPipeline(
@@ -320,15 +299,13 @@ class IconclassSequenceDataloader:
                 pad_max_shape=self.val_pad_max_shape,
             ),
             ImagePreprocessingPipeline(val_image_transform),
-            # MapPipeline(debug_msg),
         ]
 
         pipeline = SequencePipeline(pipeline_stack)
         dataloader = torch.utils.data.DataLoader(
             pipeline(),
             batch_size=self.batch_size,
-            # num_workers=self.num_workers,
-            num_workers=1,
+            num_workers=self.num_workers,
             pin_memory=True,
             collate_fn=PadCollate({"mask": 100, "source_id_sequnce": self.pad_id, "target_vec": self.pad_id}),
         )

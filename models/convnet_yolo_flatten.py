@@ -74,6 +74,11 @@ class ConvnetYoloFlatten(BaseModel):
 
         self.f1_val = pl.metrics.classification.F1(num_classes=len(self.mapping_config), multilabel=True, average=None)
 
+        self.byol_embedding_path = dict_args.get("byol_embedding_path", None)
+
+        if self.byol_embedding_path is not None:
+            self.load_pretrained_byol(self.byol_embedding_path)
+
     def forward(self, x):
         x = self.net(x)
         x = torch.flatten(x, 1)
@@ -152,7 +157,20 @@ class ConvnetYoloFlatten(BaseModel):
         parser.add_argument("--encode_model", type=str, default="resnet50")
         parser.add_argument("--mapping_path", type=str)
         parser.add_argument("--classifier_path", type=str)
+        parser.add_argument("--byol_embedding_path", type=str)
 
         parser.add_argument("--using_weights", type=bool, default=False)
 
         return parser
+
+    def load_pretrained_byol(self, path_checkpoint):
+        assert self.encode_model == "resnet50", "BYOL currently working with renset50"
+        data = torch.load(path_checkpoint)["state_dict"]
+
+        load_dict = {}
+        for name, var in data.items():
+            if "model.target_net.0._features" in name:
+                new_name = re.sub("^model.target_net.0._features.", "", name)
+                load_dict[new_name] = var
+        self.net.load_state_dict(load_dict)
+

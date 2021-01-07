@@ -1,3 +1,4 @@
+import re
 import argparse
 
 import torch
@@ -49,6 +50,11 @@ class ConvnetAttnLstm(BaseModel):
             self.vocabulary_size, self.embedding_dim, self.attention_dim, self.embedding_dim, self.max_vocab_size
         )
         self.loss = torch.nn.BCEWithLogitsLoss(reduction="none")
+
+        self.byol_embedding_path = dict_args.get("byol_embedding_path", None)
+
+        if self.byol_embedding_path is not None:
+            self.load_pretrained_byol(self.byol_embedding_path)
 
     def forward(self, x):
 
@@ -331,8 +337,20 @@ class ConvnetAttnLstm(BaseModel):
         parser.add_argument("--pretrained", type=bool, default=True)
         parser.add_argument("--encode_model", type=str, default="resnet50")
         parser.add_argument("--mapping_path", type=str)
-        parser.add_argument("--classifier_path", type=str)
+        parser.add_argument("--byol_embedding_path", type=str)
+
         return parser
+
+    def load_pretrained_byol(self, path_checkpoint):
+        assert self.encode_model == "resnet50", "BYOL currently working with renset50"
+        data = torch.load(path_checkpoint)["state_dict"]
+
+        load_dict = {}
+        for name, var in data.items():
+            if "model.target_net.0._features" in name:
+                new_name = re.sub("^model.target_net.0._features.", "", name)
+                load_dict[new_name] = var
+        self.net.load_state_dict(load_dict)
 
 
 class BahdanauAttention(nn.Module):

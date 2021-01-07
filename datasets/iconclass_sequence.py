@@ -316,7 +316,7 @@ class IconclassSequenceDataloader:
 
     @classmethod
     def add_args(cls, parent_parser):
-        parser = argparse.ArgumentParser(parents=[parent_parser], add_help=False)
+        parser = argparse.ArgumentParser(parents=[parent_parser], add_help=False, conflict_handler="resolve")
 
         parser.add_argument("--train_path", nargs="+", type=str)
         parser.add_argument("--train_annotation_path", nargs="+", type=str)

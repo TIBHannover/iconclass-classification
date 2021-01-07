@@ -1,5 +1,6 @@
 import re
 import argparse
+import logging
 
 import numpy as np
 
@@ -36,9 +37,12 @@ class ConvnetFlatten(BaseModel):
 
         self.mapping_path = dict_args.get("mapping_path", None)
         self.classifier_path = dict_args.get("classifier_path", None)
-        self.mapping_config = {}
+
+        self.using_weights = dict_args.get("using_weights", False)
+
+        self.mapping_config = []
         if self.mapping_path is not None:
-            self.mapping_config = read_jsonl(self.mapping_path, dict_key="id")
+            self.mapping_config = read_jsonl(self.mapping_path)
 
         self.classifier_config = []
         if self.classifier_path is not None:
@@ -60,6 +64,14 @@ class ConvnetFlatten(BaseModel):
         self.fc = torch.nn.Linear(self.dim, 1024)
         self.dropout2 = torch.nn.Dropout(0.5)
         self.classifier = torch.nn.Linear(1024, len(self.mapping_config))
+
+        self.weights = np.ones([1, len(self.mapping_config)])
+        if self.using_weights:
+            logging.info("Using weighting for loss")
+
+            for x in self.mapping_config:
+                self.weights[0, x["class_id"]] = x["weight"]
+        self.weights = torch.tensor(self.weights)
         self.loss = torch.nn.BCEWithLogitsLoss()
 
         self.f1_val = pl.metrics.classification.F1(num_classes=len(self.mapping_config), multilabel=True, average=None)
@@ -82,8 +94,8 @@ class ConvnetFlatten(BaseModel):
         self.image = image
 
         logits = self(image)
-
-        loss = self.loss(logits, target)
+        self.weights = self.weights.to(logits.device)
+        loss = self.loss(logits, target) * self.weights
         return {"loss": loss}
         # return {"loss": loss, "prediction": F.sigmoid(logits), "target": target}
 
@@ -138,5 +150,6 @@ class ConvnetFlatten(BaseModel):
         parser.add_argument("--encode_model", type=str, default="resnet50")
         parser.add_argument("--mapping_path", type=str)
         parser.add_argument("--classifier_path", type=str)
+        parser.add_argument("--using_weights", type=bool, default=False)
 
         return parser

@@ -75,7 +75,7 @@ class IconclassFlattenDataloader(IconclassDataloader):
     @classmethod
     def add_args(cls, parent_parser):
         parent_parser = super().add_args(parent_parser)
-        parser = argparse.ArgumentParser(parents=[parent_parser], add_help=False)
+        parser = argparse.ArgumentParser(parents=[parent_parser], add_help=False, conflict_handler="resolve")
 
         parser.add_argument("--mapping_path", type=str)
         parser.add_argument("--classifier_path", type=str)

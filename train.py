@@ -41,6 +41,8 @@ def main():
 
     logging.basicConfig(format="%(asctime)s %(levelname)s: %(message)s", datefmt="%d-%m-%Y %H:%M:%S", level=level)
 
+    pl.seed_everything(42)
+
     dataset = DatasetsManager().build_dataset(name=args.dataset, args=args)
 
     model = ModelsManager().build_model(name=args.model, args=args)

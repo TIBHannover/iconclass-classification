@@ -14,6 +14,7 @@ from datasets.pipeline import (
     ConcatShufflePipeline,
     ConcatPipeline,
     DummyPipeline,
+    ImagePipeline,
 )
 from datasets.utils import read_jsonl
 
@@ -119,6 +120,7 @@ class IconclassDataloader:
         transforms = torchvision.transforms.Compose(
             [
                 torchvision.transforms.ToPILImage(),
+                torchvision.transforms.Resize(size=224),
                 torchvision.transforms.CenterCrop(size=224),
                 torchvision.transforms.ToTensor(),
                 torchvision.transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
@@ -145,8 +147,58 @@ class IconclassDataloader:
         )
         return dataloader
 
+    def test_image_pipeline(self):
+        transforms = torchvision.transforms.Compose(
+            [
+                torchvision.transforms.ToPILImage(),
+                torchvision.transforms.Resize(size=224),
+                torchvision.transforms.CenterCrop(size=224),
+                torchvision.transforms.ToTensor(),
+                torchvision.transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+            ]
+        )
+        return ImagePreprocessingPipeline(transforms, min_size=self.val_filter_min_dim,)
+
+    def test_decode_pieline(self):
+        return SequencePipeline(
+            [
+                ConcatShufflePipeline([MsgPackPipeline(path=p) for p in self.test_path]),
+                IconclassDecoderPipeline(annotation=self.test_annotation),
+            ]
+        )
+
+    def test_mapping_pipeline(self):
+        return DummyPipeline()
+
     def test(self):
-        pass
+        pipeline = SequencePipeline(
+            [self.test_decode_pieline(), self.test_mapping_pipeline(), self.val_image_pipeline()]
+        )
+
+        dataloader = torch.utils.data.DataLoader(
+            pipeline(), batch_size=self.batch_size, num_workers=self.num_workers, pin_memory=True
+        )
+        return dataloader
+
+    def infer_image_pipeline(self):
+        transforms = torchvision.transforms.Compose(
+            [
+                torchvision.transforms.ToPILImage(),
+                torchvision.transforms.Resize(size=256),
+                torchvision.transforms.ToTensor(),
+                torchvision.transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+            ]
+        )
+        return ImagePreprocessingPipeline(transforms)
+
+    def infer(self):
+
+        pipeline = SequencePipeline([ImagePipeline(self.infer_path), self.infer_image_pipeline()])
+
+        dataloader = torch.utils.data.DataLoader(
+            pipeline(), batch_size=self.batch_size, num_workers=self.num_workers, pin_memory=True
+        )
+        return dataloader
 
     @classmethod
     def add_args(cls, parent_parser):
@@ -164,4 +216,9 @@ class IconclassDataloader:
         parser.add_argument("--val_annotation_path", type=str)
         parser.add_argument("--val_filter_min_dim", type=int, default=128, help="delete images with smaller size")
 
+        parser.add_argument("--test_path", type=str)
+        parser.add_argument("--test_annotation_path", type=str)
+        parser.add_argument("--test_filter_min_dim", type=int, default=128, help="delete images with smaller size")
+
+        parser.add_argument("--infer_path", type=str)
         return parser

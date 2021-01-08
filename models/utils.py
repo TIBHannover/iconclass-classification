@@ -25,3 +25,17 @@ def cosine_rampdown(current, rampdown_length):
     assert 0 <= current <= rampdown_length, "cosine_rampdown"
     return float(0.5 * (np.cos(np.pi * current / rampdown_length) + 1))
 
+
+import argparse
+
+
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ("yes", "true", "t", "y", "1"):
+        return True
+    elif v.lower() in ("no", "false", "f", "n", "0"):
+        return False
+    else:
+        raise argparse.ArgumentTypeError("Boolean value expected.")
+

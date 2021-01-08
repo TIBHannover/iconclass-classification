@@ -26,6 +26,7 @@ class ProgressPrinter(pl.callbacks.ProgressBarBase):
     def disable(self):
         self.enabled = False
 
+    @rank_zero_only
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx):
         super().on_train_batch_end(trainer, pl_module, outputs, batch, batch_idx, dataloader_idx)
         # print(f"TRAIN_BATCH_END {self.refresh_rate}")
@@ -43,6 +44,7 @@ class ProgressPrinter(pl.callbacks.ProgressBarBase):
 
             logging.info(f"Train {self.trainer.global_step} " + " ".join(log_parts))
 
+    @rank_zero_only
     def on_validation_end(self, trainer, pl_module):
         super().on_validation_end(trainer, pl_module)
         # print("###################")

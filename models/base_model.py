@@ -6,6 +6,8 @@ from pytorch_lightning.core.lightning import LightningModule
 
 from models.utils import linear_rampup, cosine_rampdown
 
+from models.utils import str2bool
+
 
 class BaseModel(LightningModule):
     def __init__(self, args=None, **kwargs):
@@ -19,12 +21,15 @@ class BaseModel(LightningModule):
         self.lr = dict_args.get("lr", None)
         self.weight_decay = dict_args.get("weight_decay", None)
         self.opt_type = dict_args.get("opt_type", None)
-        self.sched_type = dict_args.get("sched_type", None)
+        self.nesterov = dict_args.get("nesterov", None)
         self.momentum = dict_args.get("momentum", 0.9)
+
+        self.sched_type = dict_args.get("sched_type", None)
 
         self.lr_rampup = dict_args.get("lr_rampup", None)
         self.lr_init = dict_args.get("lr_init", None)
         self.lr_rampdown = dict_args.get("lr_rampdown", None)
+
         self.gamma = dict_args.get("gamma", None)
         self.step_size = dict_args.get("step_size", None)
 
@@ -34,11 +39,11 @@ class BaseModel(LightningModule):
 
         parser.add_argument("--lr", type=float, default=1e-3)
         parser.add_argument("--weight_decay", type=float, default=1e-3)
-        parser.add_argument("--opt_type", choices=["SGD", "LARS", "ADAM"], default="ADAM")
+        parser.add_argument("--opt_type", choices=["SGD", "LARS", "ADAM", "RMSprop"], default="ADAM")
+        parser.add_argument("--nesterov", type=str2bool, default=False)
+        parser.add_argument("--momentum", default=0.9, type=float)
 
         parser.add_argument("--sched_type", choices=["cosine", "exponetial"])
-
-        parser.add_argument("--momentum", default=0.9, type=float)
 
         parser.add_argument("--lr_rampup", default=10000, type=int)
         parser.add_argument("--lr_init", default=0.0, type=float)
@@ -79,9 +84,17 @@ class BaseModel(LightningModule):
             if type.lower() == "adam":
                 return torch.optim.AdamW(params=params, **kwargs)
 
+            if type.lower() == "rmsprop":
+                return torch.optim.RMSprop(params=params, **kwargs)
+
         if self.opt_type == "sgd":
             optimizer = build_optimizer(
-                self, type=self.opt_type, lr=self.lr, weight_decay=self.weight_decay, momentum=self.momentum
+                self,
+                type=self.opt_type,
+                lr=self.lr,
+                weight_decay=self.weight_decay,
+                momentum=self.momentum,
+                nesterov=self.nesterov,
             )
         else:
             optimizer = build_optimizer(self, type=self.opt_type, lr=self.lr, weight_decay=self.weight_decay)

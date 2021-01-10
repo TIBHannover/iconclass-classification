@@ -51,3 +51,23 @@ class ImagePreprocessingPipeline(Pipeline):
             }
 
         return MapDataset(datasets, map_fn=decode)
+
+
+class ImageDecodePreprocessingPipeline(Pipeline):
+    def __init__(self, transformation=None):
+        self.transformation = transformation
+
+    def call(self, datasets=None, **kwargs):
+        def decode(sample):
+
+            image = sample["image"]
+            if self.transformation:
+                image = self.transformation(image)
+            else:
+                image = image
+            return {
+                **sample,
+                "image": image,
+            }
+
+        return MapDataset(datasets, map_fn=decode)

@@ -39,11 +39,14 @@ def main():
 
     dataset = DatasetsManager().build_dataset(name=args.dataset, args=args)
 
+    # for x in dataset.test():
+    #     print(x)
+    # exit()
     model = ModelsManager().build_model(name=args.model, args=args)
 
     trainer = pl.Trainer.from_argparse_args(args)
 
-    trainer.test(model, test_dataloaders=dataset.test())
+    print(trainer.test(model, test_dataloaders=dataset.test()))
 
     return 0
 

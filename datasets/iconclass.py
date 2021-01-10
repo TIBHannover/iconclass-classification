@@ -4,7 +4,7 @@ import logging
 import torch
 import torchvision
 
-from datasets.image_pipeline import ImagePreprocessingPipeline
+from datasets.image_pipeline import ImagePreprocessingPipeline, ImageDecodePreprocessingPipeline
 from datasets.datasets import DatasetsManager
 from datasets.pipeline import (
     Pipeline,
@@ -66,6 +66,12 @@ class IconclassDataloader:
         self.val_annotation_path = dict_args.get("val_annotation_path", None)
         self.val_filter_min_dim = dict_args.get("val_filter_min_dim", None)
 
+        self.test_path = [dict_args.get("test_path", None)]
+        self.test_annotation_path = dict_args.get("test_annotation_path", None)
+        self.test_filter_min_dim = dict_args.get("test_filter_min_dim", None)
+
+        self.infer_path = [dict_args.get("infer_path", None)]
+
         self.batch_size = dict_args.get("batch_size", None)
         self.num_workers = dict_args.get("num_workers", None)
 
@@ -78,6 +84,11 @@ class IconclassDataloader:
         if self.val_annotation_path is not None:
             # for path in self.val_annotation_path:
             self.val_annotation.update(read_jsonl(self.val_annotation_path, dict_key="id"))
+
+        self.test_annotation = {}
+        if self.test_annotation_path is not None:
+            # for path in self.test_annotation_path:
+            self.test_annotation.update(read_jsonl(self.test_annotation_path, dict_key="id"))
 
     def train_image_pipeline(self):
         transforms = torchvision.transforms.Compose(
@@ -131,7 +142,7 @@ class IconclassDataloader:
     def val_decode_pieline(self):
         return SequencePipeline(
             [
-                ConcatShufflePipeline([MsgPackPipeline(path=p) for p in self.val_path]),
+                ConcatPipeline([MsgPackPipeline(path=p) for p in self.val_path]),
                 IconclassDecoderPipeline(annotation=self.val_annotation),
             ]
         )
@@ -162,7 +173,7 @@ class IconclassDataloader:
     def test_decode_pieline(self):
         return SequencePipeline(
             [
-                ConcatShufflePipeline([MsgPackPipeline(path=p) for p in self.test_path]),
+                ConcatPipeline([MsgPackPipeline(path=p) for p in self.test_path]),
                 IconclassDecoderPipeline(annotation=self.test_annotation),
             ]
         )
@@ -172,7 +183,7 @@ class IconclassDataloader:
 
     def test(self):
         pipeline = SequencePipeline(
-            [self.test_decode_pieline(), self.test_mapping_pipeline(), self.val_image_pipeline()]
+            [self.test_decode_pieline(), self.test_mapping_pipeline(), self.test_image_pipeline()]
         )
 
         dataloader = torch.utils.data.DataLoader(
@@ -189,7 +200,7 @@ class IconclassDataloader:
                 torchvision.transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
             ]
         )
-        return ImagePreprocessingPipeline(transforms)
+        return ImageDecodePreprocessingPipeline(transforms)
 
     def infer(self):
 

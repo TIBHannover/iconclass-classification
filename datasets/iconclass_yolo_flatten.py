@@ -97,6 +97,9 @@ class IconclassYoloFlattenDataloader(IconclassDataloader):
     def val_mapping_pipeline(self):
         return IconclassYoloFlattenDecoderPipeline(mapping=self.mapping, classifier=self.classifier)
 
+    def test_mapping_pipeline(self):
+        return IconclassYoloFlattenDecoderPipeline(mapping=self.mapping, classifier=self.classifier)
+
     @classmethod
     def add_args(cls, parent_parser):
         parent_parser = super().add_args(parent_parser)

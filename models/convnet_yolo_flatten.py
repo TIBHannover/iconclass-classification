@@ -16,6 +16,8 @@ from datasets.utils import read_jsonl
 
 from models.base_model import BaseModel
 
+from pytorch_lightning.core.decorators import auto_move_data
+
 
 @ModelsManager.export("convnet_yolo_flatten")
 class ConvnetYoloFlatten(BaseModel):
@@ -40,6 +42,10 @@ class ConvnetYoloFlatten(BaseModel):
         self.mapping_config = []
         if self.mapping_path is not None:
             self.mapping_config = read_jsonl(self.mapping_path)
+
+        self.mapping_lut = {}
+        for m in self.mapping_config:
+            self.mapping_lut[m["index"]] = m
 
         self.classifier_config = []
         if self.classifier_path is not None:
@@ -73,11 +79,14 @@ class ConvnetYoloFlatten(BaseModel):
         self.loss = torch.nn.BCEWithLogitsLoss(reduction="none")
 
         self.f1_val = pl.metrics.classification.F1(num_classes=len(self.mapping_config), multilabel=True, average=None)
+        self.f1_test = pl.metrics.classification.F1(num_classes=len(self.mapping_config), multilabel=True, average=None)
 
         self.byol_embedding_path = dict_args.get("byol_embedding_path", None)
 
         if self.byol_embedding_path is not None:
             self.load_pretrained_byol(self.byol_embedding_path)
+
+        self.test_filter_count = dict_args.get("test_filter_count", None)
 
     def forward(self, x):
         x = self.net(x)
@@ -147,6 +156,98 @@ class ConvnetYoloFlatten(BaseModel):
         for depth, x in sorted(level_results.items(), key=lambda x: x[0]):
             self.log(f"val/f1_{depth}", np.nanmean(torch.cat(x, dim=0)), prog_bar=True)
 
+    def test_step(self, batch, batch_idx):
+        image = batch["image"]
+        ids_vec = batch["ids_vec"]
+        cls_vec = batch["cls_vec"]
+        cls_ids_mask_vec = batch["cls_ids_mask_vec"]
+        logits = self(image)
+
+        loss = self.loss(logits, ids_vec) * cls_ids_mask_vec
+        loss = torch.sum(loss) / torch.sum(cls_ids_mask_vec)
+
+        self.f1_test(torch.sigmoid(logits), ids_vec)
+
+        return {"loss": loss}
+
+    def test_epoch_end(self, outputs):
+
+        loss = 0.0
+        count = 0
+        for output in outputs:
+            loss += output["loss"]
+            count += 1
+
+        self.log("test/loss", loss / count, prog_bar=True)
+
+        f1_score = self.f1_test.compute().cpu().detach()
+
+        mask = np.ones([len(self.mapping_config)])
+        if self.test_filter_count is not None and self.test_filter_count > 0:
+
+            logging.info("Using count for filter metrics")
+
+            for x in self.mapping_config:
+                mask[x["index"]] = int(x.get("count", 1) > self.test_filter_count)
+        print("######")
+        print(mask)
+        print(np.sum(mask))
+        print(np.sum(np.ones([1, len(self.mapping_config)])))
+
+        f1_score = f1_score * mask
+
+        self.log("test/f1", np.nansum(f1_score) / np.nansum(mask), prog_bar=True)
+
+        self.log(
+            f"test/num_concepts", np.nansum(mask), prog_bar=True,
+        )
+
+        level_results = {}
+        mask_results = {}
+        for i, x in enumerate(self.classifier_config):
+            if x["depth"] not in level_results:
+                level_results[x["depth"]] = []
+                mask_results[x["depth"]] = []
+            level_results[x["depth"]].append(f1_score[x["range"][0] : x["range"][1]])
+            mask_results[x["depth"]].append(mask[x["range"][0] : x["range"][1]])
+        print(len(mask_results[0][0]))
+
+        for depth, x in sorted(level_results.items(), key=lambda x: x[0]):
+            self.log(
+                f"test/f1_{depth}",
+                np.nansum(torch.cat(x, dim=0)) / np.nansum(np.concatenate(mask_results[depth], axis=0)),
+                prog_bar=True,
+            )
+
+            self.log(
+                f"test/num_concepts_{depth}", np.nansum(np.concatenate(mask_results[depth], axis=0)), prog_bar=True,
+            )
+
+    @auto_move_data
+    def infer_step(self, batch, k=10):
+        image = batch["image"]
+        logits = self(image)
+
+        logits_np = logits.cpu().detach().numpy()
+        probs_np = torch.sigmoid(logits).cpu().detach().numpy()
+        print(probs_np.shape)
+        for i in range(probs_np.shape[0]):
+            top_index = probs_np[i].argsort()[-k:][::-1]
+            # print(top_index.shape)
+
+            classes = [self.mapping_lut[x] for x in top_index.tolist()]
+            classes = [
+                {"id": x["id"], "kw": x["kw"], "txt": x["txt"], "prob": probs_np[i, top_index[j]]}
+                for j, x in enumerate(classes)
+            ]
+            # print(len(classes))
+            # exit()
+            yield {"logits": logits_np[i], "probs": probs_np[i], "top_index": top_index, "classes": classes}
+
+        exit()
+
+        return {"logits": logits_np, "probs": probs_np, "top_index": top_index, "classes": classes}
+
     @classmethod
     def add_args(cls, parent_parser):
         parent_parser = super().add_args(parent_parser)
@@ -160,7 +261,7 @@ class ConvnetYoloFlatten(BaseModel):
         parser.add_argument("--byol_embedding_path", type=str)
 
         parser.add_argument("--using_weights", type=bool, default=False)
-
+        parser.add_argument("--test_filter_count", type=int, default=-1)
         return parser
 
     def load_pretrained_byol(self, path_checkpoint):

@@ -44,10 +44,11 @@ def main():
             data.append(
                 {
                     "id": d["id"],
+                    "index": d["index"],
                     "level_id": level_id,
                     "parents": parents,
                     "parents_without_prefix": parent_id_without_prefix,
-                    "token_sequnce": parent_id_without_prefix + [level_id],
+                    "token_sequence": parent_id_without_prefix + [level_id],
                 }
             )
 
@@ -70,9 +71,9 @@ def main():
     if args.output_mapping_path is not None:
         with open(args.output_mapping_path, "w") as f:
             for d in data:
-                token_id_sequnce = [tokenizer_level[i].index(x) for i, x in enumerate(d["token_sequnce"])]
-                # print({**d, "token_id_sequnce": token_id_sequnce})
-                f.write(json.dumps({**d, "token_id_sequnce": token_id_sequnce}) + "\n")
+                token_id_sequence = [tokenizer_level[i].index(x) for i, x in enumerate(d["token_sequence"])]
+                # print({**d, "token_id_sequence": token_id_sequence})
+                f.write(json.dumps({**d, "token_id_sequence": token_id_sequence}) + "\n")
 
     if args.output_classifier_path is not None:
 

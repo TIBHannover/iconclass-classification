@@ -51,6 +51,7 @@ class ConvnetYoloFlatten(BaseModel):
         if self.classifier_path is not None:
             self.classifier_config = read_jsonl(self.classifier_path)
 
+        # Network setup
         if self.encode_model == "resnet152":
             self.net = resnet152(pretrained=self.pretrained)
             self.net = nn.Sequential(*list(self.net.children())[:-1])

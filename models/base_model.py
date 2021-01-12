@@ -33,6 +33,8 @@ class BaseModel(LightningModule):
         self.gamma = dict_args.get("gamma", None)
         self.step_size = dict_args.get("step_size", None)
 
+        print(dict_args)
+
     @classmethod
     def add_args(cls, parent_parser):
         parser = argparse.ArgumentParser(parents=[parent_parser], add_help=False, conflict_handler="resolve")
@@ -56,6 +58,7 @@ class BaseModel(LightningModule):
 
     def configure_optimizers(self):
         def build_optimizer(model, type, **kwargs):
+            print(kwargs)
             parameterwise = {
                 "(bn|gn)(\d+)?.(weight|bias)": dict(weight_decay=0.0, lars_exclude=True),
                 "bias": dict(weight_decay=0.0, lars_exclude=True),
@@ -87,7 +90,7 @@ class BaseModel(LightningModule):
             if type.lower() == "rmsprop":
                 return torch.optim.RMSprop(params=params, **kwargs)
 
-        if self.opt_type == "sgd":
+        if self.opt_type.lower() == "sgd":
             optimizer = build_optimizer(
                 self,
                 type=self.opt_type,
@@ -95,6 +98,10 @@ class BaseModel(LightningModule):
                 weight_decay=self.weight_decay,
                 momentum=self.momentum,
                 nesterov=self.nesterov,
+            )
+        elif self.opt_type.lower() == "rmsprop":
+            optimizer = build_optimizer(
+                self, type=self.opt_type, lr=self.lr, weight_decay=self.weight_decay, momentum=self.momentum,
             )
         else:
             optimizer = build_optimizer(self, type=self.opt_type, lr=self.lr, weight_decay=self.weight_decay)

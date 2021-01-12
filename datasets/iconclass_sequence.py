@@ -68,10 +68,11 @@ class IconclassSequenceDecoderPipeline(Pipeline):
 
             classes_vec = []
             classes_sequences = []
+            parents = []
             for c in sample["classes"]:
                 class_vec = []
                 sequences = []
-                token_sequence = self.mapping[c]["token_id_sequnce"]
+                token_sequence = self.mapping[c]["token_id_sequence"]
                 for l, classifier in enumerate(self.classifier):
                     one_hot = np.zeros([len(classifier["tokenizer"])])
                     if l < len(token_sequence):
@@ -83,12 +84,25 @@ class IconclassSequenceDecoderPipeline(Pipeline):
                     else:
                         sequences.append(classifier["tokenizer"].index("#PAD"))
 
+                parents_sequence = []
+                for l, classifier in enumerate(self.classifier):
+                    if l < len(self.mapping[c]["parents"]):
+
+                        parents_sequence.append(self.mapping[c]["parents"][l])
+                    else:
+                        parents_sequence.append("#PAD")
+
+                parents.append(parents_sequence)
+
+                # print(parents_sequence)
+                # print(parents)
+                # exit()
                 classes_vec.append(class_vec)
                 classes_sequences.append(sequences)
 
             if self.random_trace:
                 trace_index = random.randint(0, len(sample["classes"]) - 1)
-                source_id_sequnce = classes_sequences[trace_index]
+                source_id_sequence = classes_sequences[trace_index]
                 target_vec = classes_vec[trace_index]
 
                 trace_class = sample["classes"][trace_index]
@@ -102,19 +116,20 @@ class IconclassSequenceDecoderPipeline(Pipeline):
                             continue
                         vecs_to_merged = []
                         for i, seq in enumerate(classes_sequences):
-                            if seq[d - 1] == source_id_sequnce[d - 1]:
+                            if seq[d - 1] == source_id_sequence[d - 1]:
                                 vecs_to_merged.append(classes_vec[i][d])
 
                         target_vec[d] = np.amax(np.stack(vecs_to_merged), axis=0)
                 sample = {
                     "image_data": sample["image_data"],
                     "id": sample["id"],
-                    "source_id_sequnce": source_id_sequnce,
+                    "source_id_sequence": source_id_sequence,
                     "target_vec": target_vec,
+                    "parents": parents[trace_index],
                 }
             elif self.last_trace:
                 trace_index = len(sample["classes"]) - 1
-                source_id_sequnce = classes_sequences[trace_index]
+                source_id_sequence = classes_sequences[trace_index]
                 target_vec = classes_vec[trace_index]
 
                 trace_class = sample["classes"][trace_index]
@@ -128,18 +143,19 @@ class IconclassSequenceDecoderPipeline(Pipeline):
                             continue
                         vecs_to_merged = []
                         for i, seq in enumerate(classes_sequences):
-                            if seq[d - 1] == source_id_sequnce[d - 1]:
+                            if seq[d - 1] == source_id_sequence[d - 1]:
                                 vecs_to_merged.append(classes_vec[i][d])
 
                         target_vec[d] = np.amax(np.stack(vecs_to_merged), axis=0)
                 sample = {
                     "image_data": sample["image_data"],
                     "id": sample["id"],
-                    "source_id_sequnce": source_id_sequnce,
+                    "source_id_sequence": source_id_sequence,
                     "target_vec": target_vec,
+                    "parents": parents[trace_index],
                 }
             elif self.pad_max_shape:
-                source_id_sequnce_list = []
+                source_id_sequence_list = []
                 target_vec_list = []
                 mask = []
                 classes_vec_padded = []
@@ -154,7 +170,7 @@ class IconclassSequenceDecoderPipeline(Pipeline):
                 classes_vec_padded = np.asarray(classes_vec_padded)
 
                 for i, trace_class in enumerate(sample["classes"]):
-                    source_id_sequnce = classes_sequences[i]
+                    source_id_sequence = classes_sequences[i]
                     target_vec = classes_vec_padded[i]
 
                     target_vec = np.asarray(target_vec)
@@ -170,11 +186,11 @@ class IconclassSequenceDecoderPipeline(Pipeline):
                                 continue
                             vecs_to_merged = []
                             for i, seq in enumerate(classes_sequences):
-                                if seq[d - 1] == source_id_sequnce[d - 1]:
+                                if seq[d - 1] == source_id_sequence[d - 1]:
                                     vecs_to_merged.append(classes_vec_padded[i][d])
 
                             target_vec[d] = np.amax(np.stack(vecs_to_merged), axis=0)
-                    source_id_sequnce_list.append(source_id_sequnce)
+                    source_id_sequence_list.append(source_id_sequence)
 
                     target_vec_list.append(np.asarray(target_vec))
                     mask.append(1)
@@ -182,7 +198,7 @@ class IconclassSequenceDecoderPipeline(Pipeline):
                 sample = {
                     "image_data": sample["image_data"],
                     "id": sample["id"],
-                    "source_id_sequnce": torch.tensor(np.asarray(source_id_sequnce_list, dtype=np.int64)),
+                    "source_id_sequence": torch.tensor(np.asarray(source_id_sequence_list, dtype=np.int64)),
                     "target_vec": torch.tensor(np.asarray(target_vec_list, dtype=np.float32)),
                     "mask": torch.tensor(np.asarray(mask, dtype=np.int8)),
                 }
@@ -274,7 +290,7 @@ class IconclassSequenceDataloader:
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             pin_memory=True,
-            collate_fn=PadCollate({"mask": 100, "source_id_sequnce": self.pad_id, "target_vec": self.pad_id}),
+            collate_fn=PadCollate({"mask": 100, "source_id_sequence": self.pad_id, "target_vec": self.pad_id}),
         )
         return dataloader
 
@@ -307,7 +323,7 @@ class IconclassSequenceDataloader:
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             pin_memory=True,
-            collate_fn=PadCollate({"mask": 100, "source_id_sequnce": self.pad_id, "target_vec": self.pad_id}),
+            collate_fn=PadCollate({"mask": 100, "source_id_sequence": self.pad_id, "target_vec": self.pad_id}),
         )
         return dataloader
 

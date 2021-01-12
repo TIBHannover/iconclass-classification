@@ -1,10 +1,14 @@
 import re
 import argparse
 
+import numpy as np
+
 import torch
 from torch.nn import functional as F
 from torch import nn
 from pytorch_lightning.core.lightning import LightningModule
+
+import pytorch_lightning as pl
 from torchvision.models import resnet50, resnet152, densenet161, inception_v3
 from models.models import ModelsManager
 
@@ -24,14 +28,26 @@ class ConvnetAttnLstm(BaseModel):
         else:
             dict_args = kwargs
 
-        self.encode_model = dict_args.get("encode_model", None)
+        self.encoder_model = dict_args.get("encoder_model", None)
         self.pretrained = dict_args.get("pretrained", None)
 
         self.mapping_path = dict_args.get("mapping_path", None)
         self.classifier_path = dict_args.get("classifier_path", None)
-        self.mapping_config = {}
+        self.mapping_config = []
         if self.mapping_path is not None:
-            self.mapping_config = read_jsonl(self.mapping_path, dict_key="id")
+            self.mapping_config = read_jsonl(self.mapping_path)
+
+        self.mapping_lut = {}
+        for m in self.mapping_config:
+
+            if len(m["parents"]) < 1:
+                p = None
+            else:
+                p = m["parents"][-1]
+
+            if p not in self.mapping_lut:
+                self.mapping_lut[p] = {}
+            self.mapping_lut[p][m["token_id_sequence"][-1]] = m["index"]
 
         self.classifier_config = {}
         if self.classifier_path is not None:
@@ -44,7 +60,7 @@ class ConvnetAttnLstm(BaseModel):
         self.embedding_dim = 128
         self.attention_dim = 64
         # self.max_vocab_size = max(self.vocabulary_size)
-        self.encoder = Encoder(network="resnet152", embedding_dim=self.embedding_dim, pretrained=True)
+        self.encoder = Encoder(network=self.encoder_model, embedding_dim=self.embedding_dim, pretrained=True)
         self.encoder_dim = self.encoder.dim
         self.decoder = Decoder(
             self.vocabulary_size, self.embedding_dim, self.attention_dim, self.embedding_dim, self.max_vocab_size
@@ -56,13 +72,14 @@ class ConvnetAttnLstm(BaseModel):
         if self.byol_embedding_path is not None:
             self.load_pretrained_byol(self.byol_embedding_path)
 
-    def forward(self, x):
+        self.f1_val = pl.metrics.classification.F1(num_classes=len(self.mapping_config), multilabel=True, average=None)
 
+    def forward(self, x):
         return x
 
     def training_step(self, batch, batch_idx):
         image = batch["image"]
-        source = batch["source_id_sequnce"]
+        source = batch["source_id_sequence"]
         target = batch["target_vec"]
         # image = F.interpolate(image, size = (299,299), mode= 'bicubic', align_corners=False)
         # print(image.shape)
@@ -104,8 +121,9 @@ class ConvnetAttnLstm(BaseModel):
 
     def validation_step(self, batch, batch_idx):
         image = batch["image"]
-        source = batch["source_id_sequnce"]
+        source = batch["source_id_sequence"]
         target = batch["target_vec"]
+        parents = batch["parents"]
         # image = F.interpolate(image, size = (299,299), mode= 'bicubic', align_corners=False)
         # print(image.shape)
         # forward image
@@ -136,6 +154,14 @@ class ConvnetAttnLstm(BaseModel):
                 decoder_inp = torch.unsqueeze(source[:, 0, i_lev], dim=1)
         # target is only a list
         else:
+
+            flat_prediction = torch.zeros(image.shape[0], len(self.mapping_config), dtype=image_embedding.dtype).to(
+                image.device.index
+            )
+            flat_target = torch.zeros(image.shape[0], len(self.mapping_config), dtype=target[0].dtype).to(
+                image.device.index
+            )
+            parents_lvl = [None] * image.shape[0]
             for i_lev in range(len(target)):
                 predictions, hidden, _ = self.decoder(decoder_inp, image_embedding, hidden, i_lev)
                 # print('#########################')
@@ -145,13 +171,56 @@ class ConvnetAttnLstm(BaseModel):
                 loss += torch.mean(self.loss(predictions, target[i_lev]))
                 decoder_inp = torch.unsqueeze(source[i_lev], dim=1)
 
+                # flat_prediction = torch.cat((flat_prediction, torch.sigmoid(predictions)), 1)
+                # flat_target = torch.cat((flat_target, target[i_lev]), 1)
+
+                # print(parents_lvl)
+                source_indexes, target_indexes = self.map_level_prediction(parents_lvl)
+
+                # print(source_indexes)
+                # print(target_indexes)
+                # print(predictions.shape)
+                # print(flat_prediction.shape)
+
+                flat_prediction[target_indexes] = torch.sigmoid(predictions)[source_indexes]
+                flat_target[target_indexes] = target[i_lev][source_indexes]
+                # print(flat_prediction.shape)
+                # print(flat_prediction)
+                # exit()
+
+                parents_lvl = parents[i_lev]
+
             # decoder_inp = torch.tensor(target[i_lev]).to(torch.int64).to(image.device.index)
-        # print('#########################')
-        # print(predictions.shape)
-        # total_loss = loss / len(target)
+            # print('#########################')
+            # print(predictions.shape)
+            # total_loss = loss / len(target)
+
+            self.f1_val(flat_prediction, flat_target)
+
         return {
             "loss": loss,
         }
+
+    def map_level_prediction(self, parents):
+        target_indexes = []
+        source_indexes = []
+        # print(parents)
+        for batch_id, parent in enumerate(parents):
+            if parent not in self.mapping_lut:
+                continue
+            p = self.mapping_lut[parent]
+            for source_id, target_id in p.items():
+                target_indexes.append([batch_id, target_id])
+                source_indexes.append([batch_id, source_id])
+
+        source_indexes = np.asarray(source_indexes)
+        target_indexes = np.asarray(target_indexes)
+        if len(source_indexes.shape) < 2:
+            return np.zeros([2, 0]), np.zeros([2, 0])
+        # print(source_indexes.shape)
+        # print(target_indexes.shape)
+        # print(self.mapping_lut[None])
+        return np.swapaxes(source_indexes, 0, 1), np.swapaxes(target_indexes, 0, 1)
 
     def validation_epoch_end(self, outputs):
 
@@ -161,10 +230,23 @@ class ConvnetAttnLstm(BaseModel):
             loss += output["loss"]
             count += 1
 
+        f1_score = self.f1_val.compute().cpu().detach()
+
+        self.log("val/f1", np.nanmean(f1_score), prog_bar=True)
+
+        f1_score = self.f1_val.compute().cpu().detach()
+
+        self.log("val/f1", np.nanmean(f1_score), prog_bar=True)
+
+        level_results = {}
+        for i, x in enumerate(self.mapping_config):
+            if len(x["parents"]) not in level_results:
+                level_results[len(x["parents"])] = []
+            level_results[len(x["parents"])].append(f1_score[x["index"]])
+        for depth, x in sorted(level_results.items(), key=lambda x: x[0]):
+            self.log(f"val/f1_{depth}", np.nanmean(torch.stack(x, dim=0)), prog_bar=True)
+
         self.log("val/loss", loss / count, prog_bar=True)
-        # return {
-        #     "loss": loss / count,
-        # }
 
     def test_step(self, batch, batch_idx):
 
@@ -335,14 +417,16 @@ class ConvnetAttnLstm(BaseModel):
         # args, _ = parser.parse_known_args()
         # if "classifier_path" not in args:
         parser.add_argument("--pretrained", type=bool, default=True)
-        parser.add_argument("--encode_model", type=str, default="resnet50")
         parser.add_argument("--mapping_path", type=str)
+        parser.add_argument(
+            "--encoder_model", choices=("resnet152", "densenet161", "resnet50", "inceptionv3"), default="resnet50"
+        )
         parser.add_argument("--byol_embedding_path", type=str)
 
         return parser
 
     def load_pretrained_byol(self, path_checkpoint):
-        assert self.encode_model == "resnet50", "BYOL currently working with renset50"
+        assert self.encoder_model == "resnet50", "BYOL currently working with renset50"
         data = torch.load(path_checkpoint)["state_dict"]
 
         load_dict = {}
@@ -350,7 +434,8 @@ class ConvnetAttnLstm(BaseModel):
             if "model.target_net.0._features" in name:
                 new_name = re.sub("^model.target_net.0._features.", "", name)
                 load_dict[new_name] = var
-        self.net.load_state_dict(load_dict)
+        # TODO move this to the encoder
+        self.encoder.net.load_state_dict(load_dict)
 
 
 class BahdanauAttention(nn.Module):
@@ -404,7 +489,7 @@ class Encoder(nn.Module):
             self.dim = 1920
         elif network == "resnet50":
             self.net = resnet50(pretrained=pretrained)
-            self.net = nn.Sequential(*list(self.net.features.children())[:-1])
+            self.net = nn.Sequential(*list(self.net.children())[:-1])
             self.dim = 2048
         elif network == "inceptionv3":  # TODO:: fix the input dimension of images
             self.net = inception_v3(pretrained=pretrained, progress=False)

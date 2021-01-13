@@ -31,7 +31,7 @@ class ConvnetYoloFlatten(BaseModel):
 
         self.save_hyperparameters()
 
-        self.encode_model = dict_args.get("encode_model", None)
+        self.encoder_model = dict_args.get("encoder_model", None)
         self.pretrained = dict_args.get("pretrained", None)
 
         self.mapping_path = dict_args.get("mapping_path", None)
@@ -51,12 +51,11 @@ class ConvnetYoloFlatten(BaseModel):
         if self.classifier_path is not None:
             self.classifier_config = read_jsonl(self.classifier_path)
 
-        # Network setup
-        if self.encode_model == "resnet152":
+        if self.encoder_model == "resnet152":
             self.net = resnet152(pretrained=self.pretrained)
             self.net = nn.Sequential(*list(self.net.children())[:-1])
             self.dim = 2048
-        elif self.encode_model == "densenet161":
+        elif self.encoder_model == "densenet161":
             self.net = densenet161(pretrained=self.pretrained)
             self.net = nn.Sequential(*list(list(self.net.children())[0])[:-1])
             self.dim = 1920
@@ -87,7 +86,7 @@ class ConvnetYoloFlatten(BaseModel):
         if self.byol_embedding_path is not None:
             self.load_pretrained_byol(self.byol_embedding_path)
 
-        self.test_filter_count = dict_args.get("test_filter_count", None)
+        self.filter_count = dict_args.get("filter_count", None)
 
     def forward(self, x):
         x = self.net(x)
@@ -184,16 +183,12 @@ class ConvnetYoloFlatten(BaseModel):
         f1_score = self.f1_test.compute().cpu().detach()
 
         mask = np.ones([len(self.mapping_config)])
-        if self.test_filter_count is not None and self.test_filter_count > 0:
+        if self.filter_count is not None and self.filter_count > 0:
 
             logging.info("Using count for filter metrics")
 
             for x in self.mapping_config:
-                mask[x["index"]] = int(x.get("count", 1) > self.test_filter_count)
-        print("######")
-        print(mask)
-        print(np.sum(mask))
-        print(np.sum(np.ones([1, len(self.mapping_config)])))
+                mask[x["index"]] = int(x.get("count", 1) > self.filter_count)
 
         f1_score = f1_score * mask
 
@@ -211,7 +206,6 @@ class ConvnetYoloFlatten(BaseModel):
                 mask_results[x["depth"]] = []
             level_results[x["depth"]].append(f1_score[x["range"][0] : x["range"][1]])
             mask_results[x["depth"]].append(mask[x["range"][0] : x["range"][1]])
-        print(len(mask_results[0][0]))
 
         for depth, x in sorted(level_results.items(), key=lambda x: x[0]):
             self.log(
@@ -231,7 +225,6 @@ class ConvnetYoloFlatten(BaseModel):
 
         logits_np = logits.cpu().detach().numpy()
         probs_np = torch.sigmoid(logits).cpu().detach().numpy()
-        print(probs_np.shape)
         for i in range(probs_np.shape[0]):
             top_index = probs_np[i].argsort()[-k:][::-1]
             # print(top_index.shape)
@@ -245,10 +238,6 @@ class ConvnetYoloFlatten(BaseModel):
             # exit()
             yield {"logits": logits_np[i], "probs": probs_np[i], "top_index": top_index, "classes": classes}
 
-        exit()
-
-        return {"logits": logits_np, "probs": probs_np, "top_index": top_index, "classes": classes}
-
     @classmethod
     def add_args(cls, parent_parser):
         parent_parser = super().add_args(parent_parser)
@@ -256,17 +245,19 @@ class ConvnetYoloFlatten(BaseModel):
         # args, _ = parser.parse_known_args()
         # if "classifier_path" not in args:
         parser.add_argument("--pretrained", type=bool, default=True)
-        parser.add_argument("--encode_model", type=str, default="resnet50")
+        parser.add_argument(
+            "--encoder_model", choices=("resnet152", "densenet161", "resnet50", "inceptionv3"), default="resnet50"
+        )
         parser.add_argument("--mapping_path", type=str)
         parser.add_argument("--classifier_path", type=str)
         parser.add_argument("--byol_embedding_path", type=str)
 
         parser.add_argument("--using_weights", type=bool, default=False)
-        parser.add_argument("--test_filter_count", type=int, default=-1)
+        parser.add_argument("--filter_count", type=int, default=-1)
         return parser
 
     def load_pretrained_byol(self, path_checkpoint):
-        assert self.encode_model == "resnet50", "BYOL currently working with renset50"
+        assert self.encoder_model == "resnet50", "BYOL currently working with renset50"
         data = torch.load(path_checkpoint)["state_dict"]
 
         load_dict = {}

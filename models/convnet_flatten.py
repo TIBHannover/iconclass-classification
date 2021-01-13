@@ -32,7 +32,7 @@ class ConvnetFlatten(BaseModel):
 
         self.save_hyperparameters()
 
-        self.encode_model = dict_args.get("encode_model", None)
+        self.encoder_model = dict_args.get("encoder_model", None)
         self.pretrained = dict_args.get("pretrained", None)
 
         self.mapping_path = dict_args.get("mapping_path", None)
@@ -48,11 +48,11 @@ class ConvnetFlatten(BaseModel):
         if self.classifier_path is not None:
             self.classifier_config = read_jsonl(self.classifier_path)
 
-        if self.encode_model == "resnet152":
+        if self.encoder_model == "resnet152":
             self.net = resnet152(pretrained=self.pretrained)
             self.net = nn.Sequential(*list(self.net.children())[:-1])
             self.dim = 2048
-        elif self.encode_model == "densenet161":
+        elif self.encoder_model == "densenet161":
             self.net = densenet161(pretrained=self.pretrained)
             self.net = nn.Sequential(*list(list(self.net.children())[0])[:-1])
             self.dim = 1920
@@ -152,7 +152,9 @@ class ConvnetFlatten(BaseModel):
         # args, _ = parser.parse_known_args()
         # if "classifier_path" not in args:
         parser.add_argument("--pretrained", type=bool, default=True)
-        parser.add_argument("--encode_model", type=str, default="resnet50")
+        parser.add_argument(
+            "--encoder_model", choices=("resnet152", "densenet161", "resnet50", "inceptionv3"), default="resnet50"
+        )
         parser.add_argument("--mapping_path", type=str)
         parser.add_argument("--classifier_path", type=str)
         parser.add_argument("--using_weights", type=bool, default=False)
@@ -161,7 +163,7 @@ class ConvnetFlatten(BaseModel):
         return parser
 
     def load_pretrained_byol(self, path_checkpoint):
-        assert self.encode_model == "resnet50", "BYOL currently working with renset50"
+        assert self.encoder_model == "resnet50", "BYOL currently working with renset50"
         data = torch.load(path_checkpoint)["state_dict"]
 
         load_dict = {}

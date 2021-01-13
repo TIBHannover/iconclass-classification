@@ -120,6 +120,8 @@ class ConvnetAttnLstm(BaseModel):
         return {"loss": outputs["loss"].mean()}
 
     def validation_step(self, batch, batch_idx):
+        print(batch.keys())
+        print(batch["parents"])
         image = batch["image"]
         source = batch["source_id_sequence"]
         target = batch["target_vec"]

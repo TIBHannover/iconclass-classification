@@ -54,7 +54,7 @@ def main():
     model.load_state_dict(checkpoint_data["state_dict"])
     model.freeze()
     model.eval()
-    model.to("cuda:0")
+    # model.to("cuda:0")
 
     for batch in dataset.infer():
         for prediction in model.infer_step(batch, k=20):

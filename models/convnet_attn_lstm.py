@@ -17,6 +17,10 @@ from models.resnet import ResNet50
 from models.base_model import BaseModel
 from datasets.utils import read_jsonl
 
+from models.loss import FocalBCEWithLogitsLoss
+
+from pytorch_lightning.core.decorators import auto_move_data
+
 
 @ModelsManager.export("convnet_attn_lstm")
 class ConvnetAttnLstm(BaseModel):
@@ -33,6 +37,9 @@ class ConvnetAttnLstm(BaseModel):
 
         self.mapping_path = dict_args.get("mapping_path", None)
         self.classifier_path = dict_args.get("classifier_path", None)
+
+        self.use_focal_loss = dict_args.get("use_focal_loss", None)
+
         self.mapping_config = []
         if self.mapping_path is not None:
             self.mapping_config = read_jsonl(self.mapping_path)
@@ -65,7 +72,11 @@ class ConvnetAttnLstm(BaseModel):
         self.decoder = Decoder(
             self.vocabulary_size, self.embedding_dim, self.attention_dim, self.embedding_dim, self.max_vocab_size
         )
-        self.loss = torch.nn.BCEWithLogitsLoss(reduction="none")
+
+        if self.use_focal_loss:
+            self.loss = FocalBCEWithLogitsLoss(reduction="none")
+        else:
+            self.loss = torch.nn.BCEWithLogitsLoss(reduction="none")
 
         self.byol_embedding_path = dict_args.get("byol_embedding_path", None)
 
@@ -96,8 +107,15 @@ class ConvnetAttnLstm(BaseModel):
         # print('#########################')
         # print(decoder_inp)
         loss = 0
+        predictions_list = []
+
         for i_lev in range(len(target)):
             predictions, hidden, _ = self.decoder(decoder_inp, image_embedding, hidden, i_lev)
+            # print(f"Pre: {torch.min(predictions)} {torch.max(predictions)} {torch.mean(predictions)}")
+            # print(
+            #     f"Post: {torch.min(torch.sigmoid(predictions))} {torch.max(torch.sigmoid(predictions))} {torch.mean(torch.sigmoid(predictions))}"
+            # )
+            predictions_list.append(torch.sigmoid(predictions))
             # print('#########################')
             # print(predictions.shape)
             # print('#########################')
@@ -112,16 +130,20 @@ class ConvnetAttnLstm(BaseModel):
 
         # print(torch.mean(loss))
         loss = total_loss
-        return {"loss": torch.mean(loss)}
+        return {"loss": torch.mean(loss), "predictions": predictions_list, "targets": target}
 
     def training_step_end(self, outputs):
         self.log("train/loss", outputs["loss"].mean(), prog_bar=True)
+        if (self.global_step % self.trainer.log_every_n_steps) == 0:
+            for i, (pred, target) in enumerate(zip(outputs["predictions"], outputs["targets"])):
+                self.logger.experiment.add_histogram(f"predict_{i}", pred, self.global_step)
+                self.logger.experiment.add_histogram(f"target_{i}", target, self.global_step)
 
         return {"loss": outputs["loss"].mean()}
 
     def validation_step(self, batch, batch_idx):
-        print(batch.keys())
-        print(batch["parents"])
+        # print(batch.keys())
+        # print(batch["parents"])
         image = batch["image"]
         source = batch["source_id_sequence"]
         target = batch["target_vec"]
@@ -145,16 +167,13 @@ class ConvnetAttnLstm(BaseModel):
         if "mask" in batch:
             for i_lev in range(target.shape[2]):
                 predictions, hidden, _ = self.decoder(decoder_inp, image_embedding, hidden, i_lev)
-                # print("#######################")
-                # print(i_lev)
-                # print(predictions.shape)
-                # print(target[i_lev].shape)
+
                 prediction_size = len(self.classifier_config[i_lev]["tokenizer"])
 
                 target_lev = target[:, 0, i_lev, :prediction_size]
                 loss += torch.mean(self.loss(predictions, target_lev))
                 decoder_inp = torch.unsqueeze(source[:, 0, i_lev], dim=1)
-        # target is only a list
+
         else:
 
             flat_prediction = torch.zeros(image.shape[0], len(self.mapping_config), dtype=image_embedding.dtype).to(
@@ -166,36 +185,16 @@ class ConvnetAttnLstm(BaseModel):
             parents_lvl = [None] * image.shape[0]
             for i_lev in range(len(target)):
                 predictions, hidden, _ = self.decoder(decoder_inp, image_embedding, hidden, i_lev)
-                # print('#########################')
-                # print(predictions.shape)
-                # print('#########################')
-                # print(target[i_lev].shape)
+
                 loss += torch.mean(self.loss(predictions, target[i_lev]))
                 decoder_inp = torch.unsqueeze(source[i_lev], dim=1)
 
-                # flat_prediction = torch.cat((flat_prediction, torch.sigmoid(predictions)), 1)
-                # flat_target = torch.cat((flat_target, target[i_lev]), 1)
-
-                # print(parents_lvl)
                 source_indexes, target_indexes = self.map_level_prediction(parents_lvl)
-
-                # print(source_indexes)
-                # print(target_indexes)
-                # print(predictions.shape)
-                # print(flat_prediction.shape)
 
                 flat_prediction[target_indexes] = torch.sigmoid(predictions)[source_indexes]
                 flat_target[target_indexes] = target[i_lev][source_indexes]
-                # print(flat_prediction.shape)
-                # print(flat_prediction)
-                # exit()
 
                 parents_lvl = parents[i_lev]
-
-            # decoder_inp = torch.tensor(target[i_lev]).to(torch.int64).to(image.device.index)
-            # print('#########################')
-            # print(predictions.shape)
-            # total_loss = loss / len(target)
 
             self.f1_val(flat_prediction, flat_target)
 
@@ -251,90 +250,103 @@ class ConvnetAttnLstm(BaseModel):
         self.log("val/loss", loss / count, prog_bar=True)
 
     def test_step(self, batch, batch_idx):
+        pass
 
-        hypotheses = []
+    @auto_move_data
+    def infer_step(self, batch, k=10):
+        image = batch["image"]
+        image_embedding = self.encoder(image)
 
-        k = 3  # self.params.test.beam_size
+        self.beam_search(image_embedding)
 
-        image_embedding = self(batch["image"])
-        scores, caps_sorted, decode_lengths, alphas, sort_ind = self.decoder(
-            image_embedding,
-            batch["sequence"].to(image_embedding.device),
-            torch.sum(batch["sequence_mask"], dim=1).to(image_embedding.device),
-            device=batch["image"].device.index,
-        )
-
-        targets = caps_sorted[:, 1:]
-        scores = pack_padded_sequence(scores, decode_lengths, batch_first=True).data
-        targets = pack_padded_sequence(targets, decode_lengths, batch_first=True).data
-        loss = F.cross_entropy(scores, targets)
-        perplexity = torch.exp(loss).detach().cpu().numpy()
-
-        loss = loss.detach().cpu().numpy()
+    def beam_search(self, image_embedding, k=10):
 
         #
-        enc_image_size = image_embedding.size(1)
-        encoder_dim = image_embedding.size(3)
+        encoder_dim = image_embedding.size(2)
 
         # Flatten encoding
-        image_embedding = image_embedding.view(1, -1, encoder_dim)  # (1, num_pixels, encoder_dim)
         num_pixels = image_embedding.size(1)
 
         # We'll treat the problem as having a batch size of k
         image_embedding = image_embedding.expand(k, num_pixels, encoder_dim)  # (k, num_pixels, encoder_dim)
 
+        decoder_inp = torch.ones([k, 1], dtype=torch.int64).to(image_embedding.device.index)
         # Tensor to store top k previous words at each step; now they're just <start>
-        k_prev_words = torch.LongTensor([[self.dictionary["<start>"]]] * k).cuda(batch["image"].device.index)  # (k, 1)
+        # decoder_inp = torch.LongTensor([[self.dictionary["<start>"]]] * k).to(image_embedding.device.index)  # (k, 1)
 
         # Tensor to store top k sequences; now they're just <start>
-        seqs = k_prev_words  # (k, 1)
+        seqs = decoder_inp  # (k, 1)
 
         # Tensor to store top k sequences' scores; now they're just 0
-        top_k_scores = torch.zeros(k, 1).cuda(batch["image"].device.index)  # (k, 1)
+        top_k_scores = torch.zeros(k, 1).to(image_embedding.device.index)  # (k, 1)
 
         # Lists to store completed sequences and scores
         complete_seqs = list()
         complete_seqs_scores = list()
 
         # Start decoding
-        step = 1
-        h, c = self.decoder.init_hidden_state(image_embedding)
+        # step = 1
+        # h, c = self.decoder.init_hidden_state(image_embedding)
+
+        hidden = self.decoder.reset_state(k).to(image_embedding.device.index)
 
         # s is a number less than or equal to k, because sequences are removed from this process once they hit <end>
-        while True:
+        # while True:
 
-            embeddings = self.decoder.embedding(k_prev_words).squeeze(1)  # (s, embed_dim)
+        for i_lev in range(len(self.classifier_config)):
+            lev_dictionary = self.classifier_config[i_lev]["tokenizer"]
+            predictions, hidden, _ = self.decoder(decoder_inp, image_embedding, hidden, i_lev)
 
-            awe, _ = self.decoder.attention(image_embedding, h)  # (s, encoder_dim), (s, num_pixels)
+            predictions_prob = torch.sigmoid(predictions)
+            # print(predictions_prob.shape)
+            # print(predictions_prob)
 
-            gate = self.decoder.sigmoid(self.decoder.f_beta(h))  # gating scalar, (s, encoder_dim)
-            awe = gate * awe
-
-            h, c = self.decoder.decode_step(torch.cat([embeddings, awe], dim=1), (h, c))  # (s, decoder_dim)
-
-            scores = self.decoder.fc(h)  # (s, vocab_size)
-            scores = F.log_softmax(scores, dim=1)
-            # print(scores)
-            # Add
-            scores = top_k_scores.expand_as(scores) + scores  # (s, vocab_size)
-
-            # For the first step, all k points will have the same scores (since same k previous words, h, c)
-            if step == 1:
-                top_k_scores, top_k_words = scores[0].topk(k, 0, True, True)  # (s)
+            predictions_prob = top_k_scores.expand_as(predictions_prob) + predictions_prob  # (s, vocab_size)
+            # print(predictions_prob.shape)
+            # print(predictions_prob)
+            # Get the top_k predictions
+            if i_lev == 0:
+                top_k_scores, top_k_words = predictions_prob[0].topk(k, 0, True, True)
             else:
                 # Unroll and find top scores, and their unrolled indices
-                top_k_scores, top_k_words = scores.view(-1).topk(k, 0, True, True)  # (s)
+                top_k_scores, top_k_words = predictions_prob.view(-1).topk(k, 0, True, True)  # (s)
+
+            # print(top_k_scores)
+
+            # print(top_k_words)
+
+            # embeddings = self.decoder.embedding(decoder_inp).squeeze(1)  # (s, embed_dim)
+
+            # awe, _ = self.decoder.attention(image_embedding, h)  # (s, encoder_dim), (s, num_pixels)
+
+            # gate = self.decoder.sigmoid(self.decoder.f_beta(h))  # gating scalar, (s, encoder_dim)
+            # awe = gate * awe
+
+            # h, c = self.decoder.decode_step(torch.cat([embeddings, awe], dim=1), (h, c))  # (s, decoder_dim)
+
+            # scores = self.decoder.fc(h)  # (s, vocab_size)
+            # scores = F.log_softmax(scores, dim=1)
+            # print(scores)
+            # Add
+            # scores = top_k_scores.expand_as(scores) + scores  # (s, vocab_size)
+
+            # # For the first step, all k points will have the same scores (since same k previous words, h, c)
+            # if step == 1:
+            #     top_k_scores, top_k_words = scores[0].topk(k, 0, True, True)  # (s)
+            # else:
+            #     # Unroll and find top scores, and their unrolled indices
+            #     top_k_scores, top_k_words = scores.view(-1).topk(k, 0, True, True)  # (s)
 
             # Convert unrolled indices to actual indices of scores
-            prev_word_inds = top_k_words // len(self.dictionary.keys())  # vocab_size  # (s)
-            next_word_inds = top_k_words % len(self.dictionary.keys())  # vocab_size  # (s)
+            prev_word_inds = top_k_words // len(lev_dictionary)  # vocab_size  # (s)
+            next_word_inds = top_k_words % len(lev_dictionary)  # vocab_size  # (s)
 
             # Add new words to sequences
             seqs = torch.cat([seqs[prev_word_inds], next_word_inds.unsqueeze(1)], dim=1)  # (s, step+1)
 
             # Which sequences are incomplete (didn't reach <end>)?
             incomplete_inds = [
-                ind for ind, next_word in enumerate(next_word_inds) if next_word != self.dictionary["<end>"]
+                ind for ind, next_word in enumerate(next_word_inds) if next_word != lev_dictionary.index("#PAD")
             ]
             complete_inds = list(set(range(len(next_word_inds))) - set(incomplete_inds))
 
@@ -348,22 +360,25 @@ class ConvnetAttnLstm(BaseModel):
             if k == 0:
                 break
             seqs = seqs[incomplete_inds]
-            h = h[prev_word_inds[incomplete_inds]]
-            c = c[prev_word_inds[incomplete_inds]]
+            hidden = hidden[prev_word_inds[incomplete_inds]]
+            # c = c[prev_word_inds[incomplete_inds]]
             image_embedding = image_embedding[prev_word_inds[incomplete_inds]]
             top_k_scores = top_k_scores[incomplete_inds].unsqueeze(1)
-            k_prev_words = next_word_inds[incomplete_inds].unsqueeze(1)
+            decoder_inp = next_word_inds[incomplete_inds].unsqueeze(1)
             # print(top_k_scores)
             # Break if things have been going on too long
-            if step > 500:
-                break
-            step += 1
+            # if step > 500:
+            #     break
+            # step += 1
 
         if len(complete_seqs_scores) == 0:
             seq = seqs[0].tolist()
         else:
             i = complete_seqs_scores.index(max(complete_seqs_scores))
             seq = complete_seqs[i]
+
+        print(seqs)
+        print()
 
         # # References
         # img_caps = allcaps[0].tolist()
@@ -424,6 +439,7 @@ class ConvnetAttnLstm(BaseModel):
             "--encoder_model", choices=("resnet152", "densenet161", "resnet50", "inceptionv3"), default="resnet50"
         )
         parser.add_argument("--byol_embedding_path", type=str)
+        parser.add_argument("--use_focal_loss", action="store_true")
 
         return parser
 
@@ -486,16 +502,16 @@ class Encoder(nn.Module):
             self.net = nn.Sequential(*list(self.net.children())[:-2])
             self.dim = 2048
         elif network == "densenet161":
-            self.net = densenet161(pretrained=pretrained)
-            self.net = nn.Sequential(*list(list(self.net.children())[0])[:-1])
+            self.net = densenet161(pretrained=pretrained, progress=False)
+            self.net = nn.Sequential(*list(list(self.net.children())[0])[:-2])
             self.dim = 1920
         elif network == "resnet50":
-            self.net = resnet50(pretrained=pretrained)
-            self.net = nn.Sequential(*list(self.net.children())[:-1])
+            self.net = resnet50(pretrained=pretrained, progress=False)
+            self.net = nn.Sequential(*list(self.net.children())[:-2])
             self.dim = 2048
         elif network == "inceptionv3":  # TODO:: fix the input dimension of images
             self.net = inception_v3(pretrained=pretrained, progress=False)
-            self.net = nn.Sequential(*list(self.net.children())[:-1])
+            self.net = nn.Sequential(*list(self.net.children())[:-2])
             self.dim = 2048
         self.embedding_dim = embedding_dim
         self._fc = nn.Linear(self.dim, self.embedding_dim)  # Todo add layers

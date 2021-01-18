@@ -80,6 +80,8 @@ class IconclassSequenceDecoderPipeline(Pipeline):
                     one_hot = np.zeros([len(classifier["tokenizer"])])
                     if l < len(token_sequence):
                         one_hot[token_sequence[l]] = 1
+                    else:
+                        one_hot[classifier["tokenizer"].index("#PAD")] = 1
                     class_vec.append(one_hot)
 
                     if l < len(token_sequence):

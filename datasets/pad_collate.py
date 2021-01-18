@@ -176,6 +176,7 @@ def pad_collate(batch, pad_values=None):
     elif isinstance(elem, string_classes):
         return batch
     elif isinstance(elem, container_abcs.Mapping):
+
         return {
             key: pad_collate([d[key] for d in batch], pad_values[key] if key in pad_values else None) for key in elem
         }

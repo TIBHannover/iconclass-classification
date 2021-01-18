@@ -4,7 +4,7 @@ import logging
 import torch
 import torchvision
 
-from datasets.image_pipeline import ImagePreprocessingPipeline, ImageDecodePreprocessingPipeline
+from datasets.image_pipeline import ImagePreprocessingPipeline, ImageDecodePreprocessingPipeline, RandomResize
 from datasets.datasets import DatasetsManager
 from datasets.pipeline import (
     Pipeline,
@@ -17,6 +17,8 @@ from datasets.pipeline import (
     ImagePipeline,
 )
 from datasets.utils import read_jsonl
+
+from datasets.pad_collate import PadCollate
 
 
 class IconclassDecoderPipeline(Pipeline):
@@ -62,9 +64,12 @@ class IconclassDataloader:
         self.train_filter_min_dim = dict_args.get("train_filter_min_dim", None)
         self.train_sample_additional = dict_args.get("train_sample_additional", None)
 
+        self.train_random_sizes = dict_args.get("train_random_sizes", None)
+
         self.val_path = [dict_args.get("val_path", None)]
         self.val_annotation_path = dict_args.get("val_annotation_path", None)
         self.val_filter_min_dim = dict_args.get("val_filter_min_dim", None)
+        self.val_size = dict_args.get("val_size", None)
 
         self.test_path = [dict_args.get("test_path", None)]
         self.test_annotation_path = dict_args.get("test_annotation_path", None)
@@ -96,7 +101,8 @@ class IconclassDataloader:
                 torchvision.transforms.ToPILImage(),
                 torchvision.transforms.RandomHorizontalFlip(),
                 torchvision.transforms.RandomRotation(10),
-                torchvision.transforms.RandomResizedCrop(size=224, scale=(0.5, 1.0)),
+                RandomResize(self.train_random_sizes, max_size=800),
+                # torchvision.transforms.RandomResizedCrop(size=224, scale=(0.5, 1.0)),
                 torchvision.transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.1),
                 torchvision.transforms.ToTensor(),
                 torchvision.transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
@@ -123,7 +129,11 @@ class IconclassDataloader:
         )
 
         dataloader = torch.utils.data.DataLoader(
-            pipeline(), batch_size=self.batch_size, num_workers=self.num_workers, pin_memory=True
+            pipeline(),
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            pin_memory=True,
+            collate_fn=PadCollate(pad_values={"image": 0.0}),
         )
         return dataloader
 
@@ -131,7 +141,7 @@ class IconclassDataloader:
         transforms = torchvision.transforms.Compose(
             [
                 torchvision.transforms.ToPILImage(),
-                torchvision.transforms.Resize(size=224),
+                RandomResize([self.val_size], max_size=800),
                 torchvision.transforms.CenterCrop(size=224),
                 torchvision.transforms.ToTensor(),
                 torchvision.transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
@@ -154,7 +164,11 @@ class IconclassDataloader:
         pipeline = SequencePipeline([self.val_decode_pieline(), self.val_mapping_pipeline(), self.val_image_pipeline()])
 
         dataloader = torch.utils.data.DataLoader(
-            pipeline(), batch_size=self.batch_size, num_workers=self.num_workers, pin_memory=True
+            pipeline(),
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            pin_memory=True,
+            collate_fn=PadCollate(pad_values={"image": 0.0}),
         )
         return dataloader
 
@@ -220,12 +234,15 @@ class IconclassDataloader:
         parser.add_argument("--train_filter_min_dim", type=int, default=128, help="delete images with smaller size")
         parser.add_argument("--train_sample_additional", type=float)
 
+        parser.add_argument("--train_random_sizes", type=int, nargs="+", default=[224])
+
         parser.add_argument("--num_workers", type=int, default=8)
         parser.add_argument("--batch_size", type=int, default=8)
 
         parser.add_argument("--val_path", type=str)
         parser.add_argument("--val_annotation_path", type=str)
         parser.add_argument("--val_filter_min_dim", type=int, default=128, help="delete images with smaller size")
+        parser.add_argument("--val_size", type=int, default=224)
 
         parser.add_argument("--test_path", type=str)
         parser.add_argument("--test_annotation_path", type=str)

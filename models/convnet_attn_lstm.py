@@ -9,7 +9,6 @@ from torch import nn
 from pytorch_lightning.core.lightning import LightningModule
 
 import pytorch_lightning as pl
-from torchvision.models import resnet50, resnet152, densenet161, inception_v3
 from models.models import ModelsManager
 
 from models.resnet import ResNet50
@@ -20,6 +19,8 @@ from datasets.utils import read_jsonl
 from models.loss import FocalBCEWithLogitsLoss
 
 from pytorch_lightning.core.decorators import auto_move_data
+
+from models.encoder import Encoder
 
 
 @ModelsManager.export("convnet_attn_lstm")
@@ -39,6 +40,8 @@ class ConvnetAttnLstm(BaseModel):
         self.classifier_path = dict_args.get("classifier_path", None)
 
         self.use_focal_loss = dict_args.get("use_focal_loss", None)
+        self.focal_loss_gamma = dict_args.get("focal_loss_gamma", None)
+        self.focal_loss_alpha = dict_args.get("focal_loss_alpha", None)
 
         self.mapping_config = []
         if self.mapping_path is not None:
@@ -67,23 +70,24 @@ class ConvnetAttnLstm(BaseModel):
         self.embedding_dim = 128
         self.attention_dim = 64
         # self.max_vocab_size = max(self.vocabulary_size)
-        self.encoder = Encoder(network=self.encoder_model, embedding_dim=self.embedding_dim, pretrained=True)
+        self.encoder = Encoder(args, embedding_dim=self.embedding_dim, flatten_embedding=True)
         self.encoder_dim = self.encoder.dim
         self.decoder = Decoder(
             self.vocabulary_size, self.embedding_dim, self.attention_dim, self.embedding_dim, self.max_vocab_size
         )
 
         if self.use_focal_loss:
-            self.loss = FocalBCEWithLogitsLoss(reduction="none")
+            self.loss = FocalBCEWithLogitsLoss(
+                reduction="none", gamma=self.focal_loss_gamma, alpha=self.focal_loss_alpha
+            )
         else:
             self.loss = torch.nn.BCEWithLogitsLoss(reduction="none")
 
-        self.byol_embedding_path = dict_args.get("byol_embedding_path", None)
-
-        if self.byol_embedding_path is not None:
-            self.load_pretrained_byol(self.byol_embedding_path)
-
         self.f1_val = pl.metrics.classification.F1(num_classes=len(self.mapping_config), multilabel=True, average=None)
+
+        self.f1_val_norm = pl.metrics.classification.F1(
+            num_classes=len(self.mapping_config), multilabel=True, average=None
+        )
 
     def forward(self, x):
         return x
@@ -92,10 +96,13 @@ class ConvnetAttnLstm(BaseModel):
         image = batch["image"]
         source = batch["source_id_sequence"]
         target = batch["target_vec"]
+
+        self.image = image
         # image = F.interpolate(image, size = (299,299), mode= 'bicubic', align_corners=False)
         # print(image.shape)
         # forward image
         image_embedding = self.encoder(image)
+        # print(image_embedding.shape)
         # print('*********')
         # print(image_embedding.shape)
         # return loss
@@ -179,6 +186,10 @@ class ConvnetAttnLstm(BaseModel):
             flat_prediction = torch.zeros(image.shape[0], len(self.mapping_config), dtype=image_embedding.dtype).to(
                 image.device.index
             )
+
+            flat_prediction_norm = torch.zeros(
+                image.shape[0], len(self.mapping_config), dtype=image_embedding.dtype
+            ).to(image.device.index)
             flat_target = torch.zeros(image.shape[0], len(self.mapping_config), dtype=target[0].dtype).to(
                 image.device.index
             )
@@ -192,11 +203,17 @@ class ConvnetAttnLstm(BaseModel):
                 source_indexes, target_indexes = self.map_level_prediction(parents_lvl)
 
                 flat_prediction[target_indexes] = torch.sigmoid(predictions)[source_indexes]
+                # Compute normalized version (maxprediction == 1.)
+                flat_prediction_norm[target_indexes] = torch.sigmoid(predictions)[source_indexes] / torch.max(
+                    torch.sigmoid(predictions)
+                )
+
                 flat_target[target_indexes] = target[i_lev][source_indexes]
 
                 parents_lvl = parents[i_lev]
 
             self.f1_val(flat_prediction, flat_target)
+            self.f1_val_norm(flat_prediction_norm, flat_target)
 
         return {
             "loss": loss,
@@ -231,12 +248,8 @@ class ConvnetAttnLstm(BaseModel):
             loss += output["loss"]
             count += 1
 
+        # f1score prediction
         f1_score = self.f1_val.compute().cpu().detach()
-
-        self.log("val/f1", np.nanmean(f1_score), prog_bar=True)
-
-        f1_score = self.f1_val.compute().cpu().detach()
-
         self.log("val/f1", np.nanmean(f1_score), prog_bar=True)
 
         level_results = {}
@@ -246,6 +259,18 @@ class ConvnetAttnLstm(BaseModel):
             level_results[len(x["parents"])].append(f1_score[x["index"]])
         for depth, x in sorted(level_results.items(), key=lambda x: x[0]):
             self.log(f"val/f1_{depth}", np.nanmean(torch.stack(x, dim=0)), prog_bar=True)
+
+        # f1score each layer normalized prediction
+        f1_norm_score = self.f1_val_norm.compute().cpu().detach()
+        self.log("val/f1_norm", np.nanmean(f1_norm_score), prog_bar=True)
+
+        level_results = {}
+        for i, x in enumerate(self.mapping_config):
+            if len(x["parents"]) not in level_results:
+                level_results[len(x["parents"])] = []
+            level_results[len(x["parents"])].append(f1_norm_score[x["index"]])
+        for depth, x in sorted(level_results.items(), key=lambda x: x[0]):
+            self.log(f"val/f1_norm_{depth}", np.nanmean(torch.stack(x, dim=0)), prog_bar=True)
 
         self.log("val/loss", loss / count, prog_bar=True)
 
@@ -430,30 +455,17 @@ class ConvnetAttnLstm(BaseModel):
     @classmethod
     def add_args(cls, parent_parser):
         parent_parser = super().add_args(parent_parser)
+        parent_parser = Encoder.add_args(parent_parser)
         parser = argparse.ArgumentParser(parents=[parent_parser], add_help=False, conflict_handler="resolve")
         # args, _ = parser.parse_known_args()
         # if "classifier_path" not in args:
-        parser.add_argument("--pretrained", type=bool, default=True)
         parser.add_argument("--mapping_path", type=str)
-        parser.add_argument(
-            "--encoder_model", choices=("resnet152", "densenet161", "resnet50", "inceptionv3"), default="resnet50"
-        )
-        parser.add_argument("--byol_embedding_path", type=str)
+
         parser.add_argument("--use_focal_loss", action="store_true")
+        parser.add_argument("--focal_loss_gamma", type=float, default=2)
+        parser.add_argument("--focal_loss_alpha", type=float, default=0.25)
 
         return parser
-
-    def load_pretrained_byol(self, path_checkpoint):
-        assert self.encoder_model == "resnet50", "BYOL currently working with renset50"
-        data = torch.load(path_checkpoint)["state_dict"]
-
-        load_dict = {}
-        for name, var in data.items():
-            if "model.target_net.0._features" in name:
-                new_name = re.sub("^model.target_net.0._features.", "", name)
-                load_dict[new_name] = var
-        # TODO move this to the encoder
-        self.encoder.net.load_state_dict(load_dict)
 
 
 class BahdanauAttention(nn.Module):
@@ -491,38 +503,6 @@ class BahdanauAttention(nn.Module):
         # print('context vector {}'.format(attention_weighted_encoding.shape))
         # print('attntion weights {}'.format(attention_weights.shape))
         return attention_weighted_encoding, attention_weights
-
-
-class Encoder(nn.Module):
-    def __init__(self, network="resnet152", embedding_dim=128, pretrained=True):
-        super(Encoder, self).__init__()
-        self.network = network
-        if network == "resnet152":
-            self.net = resnet152(pretrained=pretrained, progress=False)
-            self.net = nn.Sequential(*list(self.net.children())[:-2])
-            self.dim = 2048
-        elif network == "densenet161":
-            self.net = densenet161(pretrained=pretrained, progress=False)
-            self.net = nn.Sequential(*list(list(self.net.children())[0])[:-2])
-            self.dim = 1920
-        elif network == "resnet50":
-            self.net = resnet50(pretrained=pretrained, progress=False)
-            self.net = nn.Sequential(*list(self.net.children())[:-2])
-            self.dim = 2048
-        elif network == "inceptionv3":  # TODO:: fix the input dimension of images
-            self.net = inception_v3(pretrained=pretrained, progress=False)
-            self.net = nn.Sequential(*list(self.net.children())[:-2])
-            self.dim = 2048
-        self.embedding_dim = embedding_dim
-        self._fc = nn.Linear(self.dim, self.embedding_dim)  # Todo add layers
-        self._conv1 = torch.nn.Conv2d(self.dim, self.embedding_dim, kernel_size=[1, 1])
-
-    def forward(self, x):
-        x = self.net(x)
-        x = self._conv1(x)
-        x = x.permute(0, 2, 3, 1)
-        x = x.view(x.size(0), -1, x.size(-1))
-        return x
 
 
 class Decoder(nn.Module):
@@ -567,10 +547,12 @@ class Decoder(nn.Module):
         state = state.squeeze(0)
         # print('state after gru {}'.format(state.shape))
         x = self.fc1(output)
+        x = F.relu(x)
         x = torch.reshape(x, (-1, x.size()[2]))
         # print('after gru reshape {}'.format(x.shape))
         if level < 9:
             x = self.fc2[level](x)
+            x = F.relu(x)
             x = self.fc3[level](x)
         # else:???
         #    x = self.fc2[7](x)

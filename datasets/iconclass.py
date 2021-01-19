@@ -133,7 +133,7 @@ class IconclassDataloader:
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             pin_memory=True,
-            collate_fn=PadCollate(pad_values={"image": 0.0}),
+            collate_fn=PadCollate(pad_values={"image": 0.0, "image_mask": False}),
         )
         return dataloader
 
@@ -142,7 +142,6 @@ class IconclassDataloader:
             [
                 torchvision.transforms.ToPILImage(),
                 RandomResize([self.val_size], max_size=800),
-                torchvision.transforms.CenterCrop(size=224),
                 torchvision.transforms.ToTensor(),
                 torchvision.transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
             ]
@@ -168,7 +167,7 @@ class IconclassDataloader:
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             pin_memory=True,
-            collate_fn=PadCollate(pad_values={"image": 0.0}),
+            collate_fn=PadCollate(pad_values={"image": 0.0, "image_mask": False}),
         )
         return dataloader
 

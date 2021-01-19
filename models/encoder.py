@@ -74,19 +74,19 @@ class Encoder(nn.Module):
 
         if self.encoder_model == "resnet152":
             self.net = resnet152(pretrained=self.pretrained, progress=False, norm_layer=norm_layer)
-            # self.net = nn.Sequential(*list(self.net.children())[:-2])
+            self.net = nn.Sequential(*list(self.net.children())[:-2])
             self.dim = 2048
         elif self.encoder_model == "densenet161":
             self.net = densenet161(pretrained=self.pretrained, progress=False, norm_layer=norm_layer)
-            # self.net = nn.Sequential(*list(list(self.net.children())[0])[:-2])
+            self.net = nn.Sequential(*list(list(self.net.children())[0])[:-2])
             self.dim = 1920
         elif self.encoder_model == "resnet50":
             self.net = resnet50(pretrained=self.pretrained, progress=False, norm_layer=norm_layer)
-            # self.net = nn.Sequential(*list(self.net.children())[:-2])
+            self.net = nn.Sequential(*list(self.net.children())[:-2])
             self.dim = 2048
         elif self.encoder_model == "inceptionv3":  # TODO:: fix the input dimension of images
             self.net = inception_v3(pretrained=self.pretrained, progress=False, norm_layer=norm_layer)
-            # self.net = nn.Sequential(*list(self.net.children())[:-2])
+            self.net = nn.Sequential(*list(self.net.children())[:-2])
             self.dim = 2048
 
         # for name, parameter in self.net.named_parameters():
@@ -98,7 +98,9 @@ class Encoder(nn.Module):
 
         print("###################")
 
-        self.body = IntermediateLayerGetter(self.net, return_layers={"layer4": "0"})
+        # self.body = IntermediateLayerGetter(self.net, return_layers={"layer4": "0"})
+
+        self._fc = nn.Linear(self.dim, self.embedding_dim)  # Todo add layers
 
         if self.embedding_dim is not None:
             self._conv1 = torch.nn.Conv2d(self.dim, self.embedding_dim, kernel_size=[1, 1])
@@ -107,7 +109,8 @@ class Encoder(nn.Module):
             self.load_pretrained_byol(self.byol_embedding_path)
 
     def forward(self, x):
-        x = self.body(x)["0"]
+        # x = self.body(x)["0"]
+        x = self.net(x)
         if self.embedding_dim is not None:
             x = self._conv1(x)
         if self.flatten_embedding:

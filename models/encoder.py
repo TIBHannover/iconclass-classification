@@ -99,8 +99,8 @@ class Encoder(nn.Module):
         print("###################")
 
         # self.body = IntermediateLayerGetter(self.net, return_layers={"layer4": "0"})
-
-        self._fc = nn.Linear(self.dim, self.embedding_dim)  # Todo add layers
+        if self.embedding_dim is not None:
+            self._fc = nn.Linear(self.dim, self.embedding_dim)  # Todo add layers
 
         if self.embedding_dim is not None:
             self._conv1 = torch.nn.Conv2d(self.dim, self.embedding_dim, kernel_size=[1, 1])

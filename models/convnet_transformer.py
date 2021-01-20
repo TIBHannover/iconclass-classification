@@ -235,7 +235,7 @@ class ConvnetTransformer(BaseModel):
                 level_results[len(x["parents"])] = []
             level_results[len(x["parents"])].append(f1_score[x["index"]])
         for depth, x in sorted(level_results.items(), key=lambda x: x[0]):
-            self.log(f"val/f1_{depth}", np.nanmean(torch.stack(x, dim=0)), prog_bar=True)
+            self.log(f"val/f1_{depth}", np.nanmean(torch.stack(x, dim=0)), prog_bar=False)
 
         # f1score each layer normalized prediction
         f1_norm_score = self.f1_val_norm.compute().cpu().detach()
@@ -247,7 +247,7 @@ class ConvnetTransformer(BaseModel):
                 level_results[len(x["parents"])] = []
             level_results[len(x["parents"])].append(f1_norm_score[x["index"]])
         for depth, x in sorted(level_results.items(), key=lambda x: x[0]):
-            self.log(f"val/f1_norm_{depth}", np.nanmean(torch.stack(x, dim=0)), prog_bar=True)
+            self.log(f"val/f1_norm_{depth}", np.nanmean(torch.stack(x, dim=0)), prog_bar=False)
 
         self.log("val/loss", loss / count, prog_bar=True)
 

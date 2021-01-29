@@ -281,10 +281,81 @@ class ConvnetAttnLstm(BaseModel):
     def infer_step(self, batch, k=10):
         image = batch["image"]
         image_embedding = self.encoder(image)
+        self.diverse_beam_search(image_embedding, num_groups = 10, diversity_strength = -0.2, beam_size =10)
+        self.old_beam_search(image_embedding)
+        
+    def diverse_beam_search(self, image_embedding, num_groups = 5, diversity_strength = -0.2, beam_size =10):
+        
+        encoder_dim = image_embedding.size(2)
+        # Flatten encoding
+        num_pixels = image_embedding.size(1)
+        # We'll treat the problem as having a batch size of k
+        image_embedding = image_embedding.expand(beam_size, num_pixels, encoder_dim)  # (k, num_pixels, encoder_dim)
+        decoder_inp = torch.ones([beam_size, 1], dtype=torch.int64).to(image_embedding.device.index)
+        hidden = self.decoder.reset_state(beam_size).to(image_embedding.device.index)
+        
+        final_scores =torch.zeros(beam_size, 1).to(image_embedding.device.index)
+        final_beams = torch.ones([beam_size, 1], dtype=torch.int64).to(image_embedding.device.index)
+        final_indices = []
+        for i_lev in range(len(self.classifier_config)):
+            predictions, hidden, _ = self.decoder(decoder_inp, image_embedding, hidden, i_lev)
 
-        self.beam_search(image_embedding)
+            predictions_prob = torch.sigmoid(predictions)
+            lprobs = torch.log(predictions_prob)
+            scores = final_scores
+            #diverse beam search
+            beam_size, vocab_size = lprobs.size()
 
-    def beam_search(self, image_embedding, k=10):
+            # initialize diversity penalty
+            diversity_buf = torch.zeros(lprobs[0, :].size()).to(lprobs)
+            scores_G, indices_G, beams_G = [], [], []
+            for g in range(num_groups):
+                lprobs_g = lprobs[g :: num_groups, :]
+                scores_g = scores[g :: num_groups] 
+
+                # apply diversity penalty
+                lprobs_g = torch.add(
+                    lprobs_g,
+                    other=diversity_buf.unsqueeze(0),
+                    alpha=diversity_strength,
+                )
+    
+    
+                scores_buf, indices_buf, beams_buf = self.simple_beam_search(
+                    i_lev, lprobs_g, scores_g)
+                
+                beams_buf.mul_(num_groups).add_(g) 
+    
+                scores_G.append(scores_buf.clone())
+                indices_G.append(indices_buf.clone())
+                beams_G.append(beams_buf.clone())
+    
+                # update diversity penalty
+                diversity_buf.scatter_add_(
+                    0, indices_buf, torch.ones(indices_buf.size()).to(diversity_buf)
+                )
+            prev_word_inds = torch.stack(beams_G, dim = 0).view(beam_size, -1)
+            # print(prev_word_inds)
+            final_scores = torch.stack(scores_G, dim= 0).view(beam_size, -1)
+            next_word_inds = torch.stack(indices_G, dim =0).view(beam_size, -1)  
+            # print(next_word_inds)
+            final_beams = torch.cat([final_beams[prev_word_inds].squeeze(1), next_word_inds], dim =-1)
+        print(final_beams)
+        final_beams = list(map(lambda l:l[1:], final_beams))
+        print(self.seq2str(final_beams))
+        
+        
+    def simple_beam_search(self, step, lprobs, scores):
+        beam_size, vocab_size = lprobs.size()
+        lprobs = lprobs + scores
+        top_prediction = torch.topk(lprobs.view(-1), beam_size, 0)
+        scores_buf = top_prediction[0]
+        indices_buf = top_prediction[1]
+        beams_buf = indices_buf // vocab_size
+        indices_buf = indices_buf.fmod(vocab_size)
+        return scores_buf, indices_buf,beams_buf
+    
+    def old_beam_search(self, image_embedding, k=10):
 
         #
         encoder_dim = image_embedding.size(2)
@@ -300,7 +371,7 @@ class ConvnetAttnLstm(BaseModel):
         # decoder_inp = torch.LongTensor([[self.dictionary["<start>"]]] * k).to(image_embedding.device.index)  # (k, 1)
 
         # Tensor to store top k sequences; now they're just <start>
-        seqs = decoder_inp  # (k, 1)
+        seqs = torch.ones([k, 1], dtype=torch.int64).to(image_embedding.device.index)  # (k, 1)
 
         # Tensor to store top k sequences' scores; now they're just 0
         top_k_scores = torch.zeros(k, 1).to(image_embedding.device.index)  # (k, 1)
@@ -324,9 +395,14 @@ class ConvnetAttnLstm(BaseModel):
 
             predictions_prob = torch.sigmoid(predictions)
             # print(predictions_prob.shape)
+            
             # print(predictions_prob)
-
-            predictions_prob = top_k_scores.expand_as(predictions_prob) + predictions_prob  # (s, vocab_size)
+            # print('*************')
+            # print('*************')
+            
+            # print('*************')
+            # print('*************')
+            predictions_prob = top_k_scores.expand_as(predictions_prob) + predictions_prob#/predictions_prob.max(0, keepdim=True)[0]  # (s, vocab_size)
             # print(predictions_prob.shape)
             # print(predictions_prob)
             # Get the top_k predictions
@@ -368,7 +444,7 @@ class ConvnetAttnLstm(BaseModel):
 
             # Add new words to sequences
             seqs = torch.cat([seqs[prev_word_inds], next_word_inds.unsqueeze(1)], dim=1)  # (s, step+1)
-
+            # print(seqs)
             # Which sequences are incomplete (didn't reach <end>)?
             incomplete_inds = [
                 ind for ind, next_word in enumerate(next_word_inds) if next_word != lev_dictionary.index("#PAD")
@@ -390,7 +466,7 @@ class ConvnetAttnLstm(BaseModel):
             image_embedding = image_embedding[prev_word_inds[incomplete_inds]]
             top_k_scores = top_k_scores[incomplete_inds].unsqueeze(1)
             decoder_inp = next_word_inds[incomplete_inds].unsqueeze(1)
-            # print(top_k_scores)
+            # print(decoder_inp)
             # Break if things have been going on too long
             # if step > 500:
             #     break
@@ -403,7 +479,7 @@ class ConvnetAttnLstm(BaseModel):
             seq = complete_seqs[i]
 
         print(seqs)
-        print()
+       
 
         # # References
         # img_caps = allcaps[0].tolist()
@@ -413,18 +489,27 @@ class ConvnetAttnLstm(BaseModel):
         # references.append(img_captions)
 
         # Hypotheses
+        #delete the first column in the generated seq
+        seqs = list(map(lambda l:l[1:], seqs))
+        # print(seqs)
+        # print('******')
+        # for ii in range(len(self.classifier_config)):
+        #     print('number of labels in level {} is {}'.format(ii, len(self.classifier_config[ii]['tokenizer'])))
+        # print(self.classifier_config)
 
-        result_idx = [
-            w for w in seq if w not in {self.dictionary["<start>"], self.dictionary["<end>"], self.dictionary["<pad>"]}
-        ]
-        result_str = [self.inv_dictionary[w] for w in result_idx]
+        print(self.seq2str(seqs))
+        
+        # result_idx = [
+        #     w for w in seq if w not in {self.dictionary["<start>"], self.dictionary["<end>"], self.dictionary["<pad>"]}
+        # ]
+        # result_str = [self.inv_dictionary[w] for w in result_idx]
 
-        gt = batch["sequence"].squeeze(0).cpu().numpy().tolist()
+        # gt = batch["sequence"].squeeze(0).cpu().numpy().tolist()
 
-        gt_idx = [
-            w for w in gt if w not in {self.dictionary["<start>"], self.dictionary["<end>"], self.dictionary["<pad>"]}
-        ]
-        gt_str = [self.inv_dictionary[w] for w in gt_idx]
+        # gt_idx = [
+        #     w for w in gt if w not in {self.dictionary["<start>"], self.dictionary["<end>"], self.dictionary["<pad>"]}
+        # ]
+        # gt_str = [self.inv_dictionary[w] for w in gt_idx]
 
         # print("########")
         # print(gt_str)
@@ -450,8 +535,20 @@ class ConvnetAttnLstm(BaseModel):
         #         os.path.join(image_out, f"{filename}.jpg"), batch["image"].squeeze(0).squeeze(0).cpu().numpy()
         #     )
 
-        return {"loss": loss, "perplexity": perplexity, "gt_str": gt_str, "pred_str": result_str}
-
+        # return {"loss": loss, "perplexity": perplexity, "gt_str": gt_str, "pred_str": result_str}
+        
+    def seq2str(self, seqs):
+        # reverse the indexes in dictionary to the string labels 
+        final_lbs = list()
+        for seq in seqs:
+            label_hirarchy = list() 
+            for i_lev in range(len(seq)):
+                label_hirarchy.append(self.classifier_config[i_lev]['tokenizer'][seq[i_lev]])
+                
+            # print(''.join(label_hirarchy))
+            final_lbs.append(''.join(label_hirarchy))
+        return final_lbs
+    
     @classmethod
     def add_args(cls, parent_parser):
         parent_parser = super().add_args(parent_parser)

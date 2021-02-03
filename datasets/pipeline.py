@@ -5,7 +5,7 @@ import argparse
 import logging
 import random
 import typing
-
+import copy
 
 import numpy as np
 import torch
@@ -31,6 +31,40 @@ Image.MAX_IMAGE_PIXELS = 1000000000  # set max pixel up high
 def list_files(path, patter=r".*?\.rec"):
     patter_re = re.compile(patter)
     return [os.path.join(path, x) for x in os.listdir(path) if re.match(patter_re, x)]
+
+
+def get_node_rank():
+    if not torch.distributed.is_initialized():
+
+        node_rank = os.environ.get("LOCAL_RANK")
+        if node_rank is not None:
+            return node_rank
+
+        return 0
+    return torch.distributed.get_rank()
+
+
+def get_world_size():
+    if not torch.distributed.is_initialized():
+        return 1
+    return torch.distributed.get_world_size()
+
+
+def split_chunk_by_nodes(chunks):
+    if not torch.distributed.is_initialized():
+        return chunks
+    rank = torch.distributed.get_rank()
+    world_size = torch.distributed.get_world_size()
+    return chunks[rank::world_size]
+
+
+def split_chunk_by_workers(chunks):
+    worker_info = torch.utils.data.get_worker_info()
+    if worker_info is None:
+        return chunks
+    worker_rank = worker_info.id
+    worker_size = worker_info.num_workers
+    return chunks[worker_rank::worker_size]
 
 
 class Dataset(torch.utils.data.IterableDataset):
@@ -61,7 +95,7 @@ class RangePipeline(Pipeline):
 
 
 class ImageDataset(Dataset):
-    def __init__(self, path, shuffle=True, sample_per_shard=1024, image_re=r".*?\.(jpg|jpeg|png|bmp)"):
+    def __init__(self, path, shuffle=True, sample_per_shard=1024, image_re=r".*?\.(jpg|jpeg|png|bmp)", splitters=None):
         super(ImageDataset, self).__init__()
 
         self.path = path
@@ -112,8 +146,8 @@ class ImageDataset(Dataset):
 
                 yield {"image": image, "path": key}
 
-    def __len__(self):
-        return self.length
+    # def __len__(self):
+    #     return self.length
 
 
 class ImagePipeline(Pipeline):
@@ -128,7 +162,9 @@ class ImagePipeline(Pipeline):
 
 
 class MsgPackDataset(Dataset):
-    def __init__(self, path, shuffle=True, sample_per_shard=1024, shard_re=r"shard_(\d+).msg"):
+    def __init__(
+        self, path, shuffle=True, sample_per_shard=1024, shard_re=r"shard_(\d+).msg", splitters=None,
+    ):
         super(MsgPackDataset, self).__init__()
         self.path = path
 
@@ -141,28 +177,29 @@ class MsgPackDataset(Dataset):
         for p in self.path:
             self.shards_paths.extend([os.path.join(p, x) for x in os.listdir(p) if re.match(shard_re, x)])
 
+        self.splitters = splitters
+        if splitters is None:
+            self.splitters = [split_chunk_by_workers]
+
+            # self.splitters = [split_chunk_by_workers]
         self.length = len(self.shards_paths) * sample_per_shard
 
+        self.random_gen = random.Random(get_node_rank())
         self.shuffle = shuffle
 
     def __iter__(self):
-        worker_info = torch.utils.data.get_worker_info()
+        rank = get_node_rank()
 
-        if worker_info is not None:
+        shards_paths = copy.deepcopy(self.shards_paths)
+        for splitter in self.splitters:
+            shards_paths = splitter(shards_paths)
 
-            def split_list(alist, splits=1):
-                length = len(alist)
-                return [alist[i * length // splits : (i + 1) * length // splits] for i in range(splits)]
-
-            keys = split_list(self.shards_paths, worker_info.num_workers)[worker_info.id]
-
-        else:
-            keys = self.shards_paths
+        keys = shards_paths
 
         if self.shuffle:
-            random.shuffle(keys)
+            self.random_gen.shuffle(keys)
+            logging.info(f"Dataset on rank {rank}: {keys[:3]}")
 
-        cache = []
         for key in keys:
             with open(key, "rb") as f:
                 unpacker = msgpack.Unpacker(f, max_buffer_size=1024 * 1024 * 1024, raw=True)
@@ -170,20 +207,23 @@ class MsgPackDataset(Dataset):
                 for x in unpacker:
                     yield x
 
-    def __len__(self):
-        return self.length
+    # def __len__(self):
+    #     return self.length
 
 
 class MsgPackPipeline(Pipeline):
-    def __init__(self, path, shuffle=True, sample_per_shard=1024, shard_re=r"shard_(\d+).msg"):
+    def __init__(self, path, shuffle=True, sample_per_shard=1024, shard_re=r"shard_(\d+).msg", splitters=None):
         super(MsgPackPipeline, self).__init__()
         self.path = path
         self.shuffle = shuffle
         self.sample_per_shard = sample_per_shard
         self.shard_re = shard_re
+        self.splitters = splitters
 
     def call(self, datasets=None, **kwargs):
-        return MsgPackDataset(self.path, self.shuffle, self.sample_per_shard, shard_re=self.shard_re)
+        return MsgPackDataset(
+            self.path, self.shuffle, self.sample_per_shard, shard_re=self.shard_re, splitters=self.splitters
+        )
 
 
 class CacheDataset(torch.utils.data.IterableDataset):
@@ -220,8 +260,8 @@ class CacheDataset(torch.utils.data.IterableDataset):
                 continue
             yield y
 
-    def __len__(self):
-        return len(self.dataset)
+    # def __len__(self):
+    #     return len(self.dataset)
 
 
 class CachePipeline(Pipeline):
@@ -251,8 +291,8 @@ class MapDataset(Dataset):
                 continue
             yield sample
 
-    def __len__(self):
-        return len(self.dataset)
+    # def __len__(self):
+    #     return len(self.dataset)
 
 
 class MapPipeline(Pipeline):
@@ -444,8 +484,8 @@ class ConcatPipeline(Pipeline):
                     for sample in pl:
                         yield sample
 
-            def __len__(self):
-                return sum([len(d) for d in pls])
+            # def __len__(self):
+            #     return sum([len(d) for d in pls])
 
         return Concat()
 
@@ -483,8 +523,8 @@ class ConcatShufflePipeline(Pipeline):
                         if all(all_done):
                             return
 
-            def __len__(self):
-                return sum([len(d) for d in pls])
+            # def __len__(self):
+            #     return sum([len(d) for d in pls])
 
         return Concat()
 

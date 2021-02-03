@@ -67,8 +67,8 @@ class ConvnetAttnLstm(BaseModel):
 
         self.vocabulary_size = [len(x["tokenizer"]) for x in self.classifier_config]  # get from tockenizer
         self.max_vocab_size = max(self.vocabulary_size)
-        self.embedding_dim = 128
-        self.attention_dim = 64
+        self.embedding_dim = 256
+        self.attention_dim = 128
         # self.max_vocab_size = max(self.vocabulary_size)
         self.encoder = Encoder(args, embedding_dim=self.embedding_dim, flatten_embedding=True)
         self.encoder_dim = self.encoder.dim
@@ -258,7 +258,7 @@ class ConvnetAttnLstm(BaseModel):
                 level_results[len(x["parents"])] = []
             level_results[len(x["parents"])].append(f1_score[x["index"]])
         for depth, x in sorted(level_results.items(), key=lambda x: x[0]):
-            self.log(f"val/f1_{depth}", np.nanmean(torch.stack(x, dim=0)), prog_bar=True)
+            self.log(f"val/f1_{depth}", np.nanmean(torch.stack(x, dim=0)), prog_bar=False)
 
         # f1score each layer normalized prediction
         f1_norm_score = self.f1_val_norm.compute().cpu().detach()
@@ -270,7 +270,7 @@ class ConvnetAttnLstm(BaseModel):
                 level_results[len(x["parents"])] = []
             level_results[len(x["parents"])].append(f1_norm_score[x["index"]])
         for depth, x in sorted(level_results.items(), key=lambda x: x[0]):
-            self.log(f"val/f1_norm_{depth}", np.nanmean(torch.stack(x, dim=0)), prog_bar=True)
+            self.log(f"val/f1_norm_{depth}", np.nanmean(torch.stack(x, dim=0)), prog_bar=False)
 
         self.log("val/loss", loss / count, prog_bar=True)
 
@@ -612,8 +612,13 @@ class Decoder(nn.Module):
         self.gru = nn.GRU(embedding_dim + encoder_dim, attention_dim, bias=True)
         # Todo add more linear layers Todo add kernel regulizer
         self.fc1 = nn.Linear(attention_dim, attention_dim)
-        self.fc2 = nn.ModuleList([nn.Linear(attention_dim, attention_dim) for i in range(len(vocabulary_size))])
-        self.fc3 = nn.ModuleList([nn.Linear(attention_dim, vocabulary_size[i]) for i in range(len(vocabulary_size))])
+
+        self.fc3 = nn.ModuleList(
+            [
+                nn.Sequential(nn.ReLU(), nn.Dropout(0.5), nn.Linear(attention_dim, vocabulary_size[i]))
+                for i in range(len(vocabulary_size))
+            ]
+        )
         self.attention = BahdanauAttention(encoder_dim, attention_dim)
         # Todo add drop out layers
 
@@ -637,6 +642,7 @@ class Decoder(nn.Module):
         # print(context_vec.shape)
         x = torch.cat([context_vec.unsqueeze(1), x], dim=2)
         # print('before gru {}'.format(x.shape))
+
         output, state = self.gru(x.permute(1, 0, 2))
         # print('output after gru {}'.format(output.shape))
 
@@ -644,12 +650,9 @@ class Decoder(nn.Module):
         state = state.squeeze(0)
         # print('state after gru {}'.format(state.shape))
         x = self.fc1(output)
-        x = F.relu(x)
         x = torch.reshape(x, (-1, x.size()[2]))
         # print('after gru reshape {}'.format(x.shape))
         if level < 9:
-            x = self.fc2[level](x)
-            x = F.relu(x)
             x = self.fc3[level](x)
         # else:???
         #    x = self.fc2[7](x)

@@ -15,6 +15,8 @@ from datasets.pipeline import (
     ConcatPipeline,
     DummyPipeline,
     ImagePipeline,
+    split_chunk_by_nodes,
+    split_chunk_by_workers,
 )
 from datasets.utils import read_jsonl
 
@@ -28,7 +30,6 @@ class IconclassDecoderPipeline(Pipeline):
 
     def call(self, datasets=None, **kwargs):
         def decode(sample):
-
             out_sample = {
                 "image_data": sample[b"image"],
                 "id": sample[b"id"].decode("utf-8"),
@@ -132,7 +133,7 @@ class IconclassDataloader:
             pipeline(),
             batch_size=self.batch_size,
             num_workers=self.num_workers,
-            pin_memory=True,
+            drop_last=True,
             collate_fn=PadCollate(pad_values={"image": 0.0, "image_mask": False}),
         )
         return dataloader
@@ -151,7 +152,7 @@ class IconclassDataloader:
     def val_decode_pieline(self):
         return SequencePipeline(
             [
-                ConcatPipeline([MsgPackPipeline(path=p) for p in self.val_path]),
+                ConcatPipeline([MsgPackPipeline(path=p, shuffle=False) for p in self.val_path]),
                 IconclassDecoderPipeline(annotation=self.val_annotation),
             ]
         )
@@ -166,7 +167,7 @@ class IconclassDataloader:
             pipeline(),
             batch_size=self.batch_size,
             num_workers=self.num_workers,
-            pin_memory=True,
+            drop_last=True,
             collate_fn=PadCollate(pad_values={"image": 0.0, "image_mask": False}),
         )
         return dataloader
@@ -186,7 +187,7 @@ class IconclassDataloader:
     def test_decode_pieline(self):
         return SequencePipeline(
             [
-                ConcatPipeline([MsgPackPipeline(path=p) for p in self.test_path]),
+                ConcatPipeline([MsgPackPipeline(path=p, shuffle=False) for p in self.test_path]),
                 IconclassDecoderPipeline(annotation=self.test_annotation),
             ]
         )

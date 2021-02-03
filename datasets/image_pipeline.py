@@ -89,16 +89,21 @@ class ImagePreprocessingPipeline(Pipeline):
 
             if "additional" in sample:
                 del sample["additional"]
+
             del sample["image_data"]
             if self.transformation:
                 image = self.transformation(image)
             else:
                 image = image
-            return {
+
+            output_sample = {
                 **sample,
                 "image": image,
                 "image_mask": torch.ones(image.shape[1:3], dtype=torch.bool, device=image.device),
             }
+
+            # print(f" #### {output_sample.keys()} {output_sample['image'].shape} {output_sample['image'].dtype}")
+            return output_sample
 
         return MapDataset(datasets, map_fn=decode)
 

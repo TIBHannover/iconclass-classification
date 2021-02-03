@@ -50,21 +50,6 @@ class IconclassSequenceDecoderPipeline(Pipeline):
 
     def call(self, datasets=None, **kwargs):
         def decode(sample):
-            # if b"additional" in sample:
-            #     # print(sample[b"additional"])
-            #     pass
-
-            # sample = {
-            #     "image_data": sample[b"image"],
-            #     "id": sample[b"id"].decode("utf-8"),
-            #     "path": sample[b"path"].decode("utf-8"),
-            # }
-
-            # if sample["id"] not in self.annotation:
-            #     logging.info(f"Dataset: {sample['id']} not in annotation")
-            #     return None
-            # else:
-            #     sample.update(self.annotation[sample["id"]])
 
             classes_vec_max_length = max([len(x["tokenizer"]) for x in self.classifier])
             pad_id = self.classifier[0]["tokenizer"].index("#PAD")
@@ -99,9 +84,6 @@ class IconclassSequenceDecoderPipeline(Pipeline):
 
                 parents.append(parents_sequence)
 
-                # print(parents_sequence)
-                # print(parents)
-                # exit()
                 classes_vec.append(class_vec)
                 classes_sequences.append(sequences)
 
@@ -125,7 +107,7 @@ class IconclassSequenceDecoderPipeline(Pipeline):
                                 vecs_to_merged.append(classes_vec[i][d])
 
                         target_vec[d] = np.amax(np.stack(vecs_to_merged), axis=0)
-                sample = {
+                out_sample = {
                     "image_data": sample["image_data"],
                     "id": sample["id"],
                     "source_id_sequence": source_id_sequence,
@@ -152,7 +134,7 @@ class IconclassSequenceDecoderPipeline(Pipeline):
                                 vecs_to_merged.append(classes_vec[i][d])
 
                         target_vec[d] = np.amax(np.stack(vecs_to_merged), axis=0)
-                sample = {
+                out_sample = {
                     "image_data": sample["image_data"],
                     "id": sample["id"],
                     "source_id_sequence": source_id_sequence,
@@ -200,7 +182,7 @@ class IconclassSequenceDecoderPipeline(Pipeline):
                     target_vec_list.append(np.asarray(target_vec))
                     mask.append(1)
 
-                sample = {
+                out_sample = {
                     "image_data": sample["image_data"],
                     "id": sample["id"],
                     "source_id_sequence": torch.tensor(np.asarray(source_id_sequence_list, dtype=np.int64)),
@@ -208,7 +190,10 @@ class IconclassSequenceDecoderPipeline(Pipeline):
                     "mask": torch.tensor(np.asarray(mask, dtype=np.int8)),
                 }
 
-            return sample
+            if "additional" in sample:
+                out_sample["additional"] = sample["additional"]
+
+            return out_sample
 
         return MapDataset(datasets, map_fn=decode)
 

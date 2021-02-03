@@ -89,20 +89,21 @@ class Encoder(nn.Module):
             # self.net = nn.Sequential(*list(self.net.children())[:-2])
             self.dim = 2048
 
-        # for name, parameter in self.net.named_parameters():
+        if self.encoder_finetune is not None:
+            if len(self.encoder_finetune) > 0:
 
-        # if self.encoder_finetune is None or len(self.encoder_finetune) > 0:
-
-        for name, parameter in self.net.named_parameters():
-            if not self.encoder_finetune or "layer2" not in name and "layer3" not in name and "layer4" not in name:
+                for name, parameter in self.net.named_parameters():
+                    finetune_layer = False
+                    for x in self.encoder_finetune:
+                        if x in name:
+                            finetune_layer = True
+                    if not finetune_layer:
+                        parameter.requires_grad_(False)
+        else:
+            for name, parameter in self.net.named_parameters():
                 parameter.requires_grad_(False)
-            # print(name)
-
-        # print("###################")
 
         self.body = IntermediateLayerGetter(self.net, return_layers={"layer4": "0"})
-        # if self.embedding_dim is not None:
-        #     self._fc = nn.Linear(self.dim, self.embedding_dim)  # Todo add layers
 
         if self.embedding_dim is not None:
             self._conv1 = torch.nn.Conv2d(self.dim, self.embedding_dim, kernel_size=[1, 1])

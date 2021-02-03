@@ -126,16 +126,17 @@ class ConvnetTransformer(BaseModel):
         # print(torch.mean(loss))
         total_loss = loss / len(target)
 
+
         # print(torch.mean(loss))
         loss = total_loss
         return {"loss": torch.mean(loss), "predictions": predictions, "targets": target}
 
     def training_step_end(self, outputs):
-        self.log("train/loss", outputs["loss"].mean(), prog_bar=True)
+        self.log("train/loss", outputs["loss"].mean(), prog_bar=True, logger=True)
         if (self.global_step % self.trainer.log_every_n_steps) == 0:
             for i, (pred, target) in enumerate(zip(outputs["predictions"], outputs["targets"])):
-                self.logger.experiment.add_histogram(f"predict_{i}", pred, self.global_step)
-                self.logger.experiment.add_histogram(f"target_{i}", target, self.global_step)
+                self.logger.experiment.add_histogram(f"train/predict_{i}", pred, self.global_step)
+                self.logger.experiment.add_histogram(f"train/target_{i}", target, self.global_step)
 
         return {"loss": outputs["loss"].mean()}
 

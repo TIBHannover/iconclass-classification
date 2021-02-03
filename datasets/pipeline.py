@@ -34,28 +34,30 @@ def list_files(path, patter=r".*?\.rec"):
 
 
 def get_node_rank():
-    if not torch.distributed.is_initialized():
+    # if not torch.distributed.is_initialized():
 
-        node_rank = os.environ.get("LOCAL_RANK")
-        if node_rank is not None:
-            return node_rank
+    node_rank = os.environ.get("LOCAL_RANK")
+    if node_rank is not None:
+        return node_rank
 
-        return 0
-    return torch.distributed.get_rank()
+    return 0
 
 
 def get_world_size():
-    if not torch.distributed.is_initialized():
-        return 1
-    return torch.distributed.get_world_size()
+    world_size = os.environ.get("WORLD_SIZE", "1")
+    return int(world_size)
 
 
 def split_chunk_by_nodes(chunks):
-    if not torch.distributed.is_initialized():
-        return chunks
-    rank = torch.distributed.get_rank()
-    world_size = torch.distributed.get_world_size()
-    return chunks[rank::world_size]
+    return chunks
+
+
+# def split_chunk_by_nodes(chunks):
+#     if not torch.distributed.is_initialized():
+#         return chunks
+#     rank = torch.distributed.get_rank()
+#     world_size = torch.distributed.get_world_size()
+#     return chunks[rank::world_size]
 
 
 def split_chunk_by_workers(chunks):

@@ -62,11 +62,14 @@ class ImagePreprocessingPipeline(Pipeline):
 
     def call(self, datasets=None, **kwargs):
         def decode(sample):
-            if self.sample_additional is not None:
-                if "additional" not in sample:
-                    return None
-                if len(sample["additional"]) == 0:
-                    return None
+            has_additional = True
+            if "additional" not in sample:
+                has_additional = False
+            if has_additional and len(sample["additional"]) == 0:
+                has_additional = False
+
+            if self.sample_additional is not None and has_additional:
+
                 if isinstance(self.sample_additional, float):
                     prob = self.sample_additional
                 else:

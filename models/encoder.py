@@ -68,6 +68,8 @@ class Encoder(nn.Module):
         self.use_frozen_batch_norm = dict_args.get("use_frozen_batch_norm", None)
         self.encoder_finetune = dict_args.get("encoder_finetune", None)
 
+        self.layers_returned = dict_args.get("layers_returned", ["layer4"])
+
         norm_layer = None
         if self.use_frozen_batch_norm:
             norm_layer = FrozenBatchNorm2d
@@ -75,19 +77,21 @@ class Encoder(nn.Module):
         if self.encoder_model == "resnet152":
             self.net = resnet152(pretrained=self.pretrained, progress=False, norm_layer=norm_layer)
             # self.net = nn.Sequential(*list(self.net.children())[:-2])
-            self.dim = 2048
+            self.dim_3 = 1024
+            self.dim_4 = 2048
         elif self.encoder_model == "densenet161":
             self.net = densenet161(pretrained=self.pretrained, progress=False, norm_layer=norm_layer)
             # self.net = nn.Sequential(*list(list(self.net.children())[0])[:-2])
-            self.dim = 1920
+            self.dim_4 = 1920
         elif self.encoder_model == "resnet50":
             self.net = resnet50(pretrained=self.pretrained, progress=False, norm_layer=norm_layer)
             # self.net = nn.Sequential(*list(self.net.children())[:-2])
-            self.dim = 2048
+            self.dim_3 = 1024
+            self.dim_4 = 2048
         elif self.encoder_model == "inceptionv3":  # TODO:: fix the input dimension of images
             self.net = inception_v3(pretrained=self.pretrained, progress=False, norm_layer=norm_layer)
             # self.net = nn.Sequential(*list(self.net.children())[:-2])
-            self.dim = 2048
+            self.dim_4 = 2048
 
         if self.encoder_finetune is not None:
             if len(self.encoder_finetune) > 0:
@@ -103,22 +107,48 @@ class Encoder(nn.Module):
             for name, parameter in self.net.named_parameters():
                 parameter.requires_grad_(False)
 
-        self.body = IntermediateLayerGetter(self.net, return_layers={"layer4": "0"})
+        # for name, parameter in self.net.named_parameters():
+        #     print(f"{name}:::::{parameter.shape}")
+        # exit()
+
+        self.body = IntermediateLayerGetter(
+            self.net, return_layers={x: str(i) for i, x in enumerate(self.layers_returned)}
+        )
+
+        self.dim = []
+        for i, x in enumerate(self.layers_returned):
+            if x == "layer4":
+                self.dim.append(self.dim_4)
+            if x == "layer3":
+                self.dim.append(self.dim_3)
 
         if self.embedding_dim is not None:
-            self._conv1 = torch.nn.Conv2d(self.dim, self.embedding_dim, kernel_size=[1, 1])
+            embedding_layers = []
+            for i, x in enumerate(self.layers_returned):
+                if x == "layer4":
+                    embedding_layers.append(torch.nn.Conv2d(self.dim_4, self.embedding_dim, kernel_size=[1, 1]))
+                elif x == "layer3":
+                    embedding_layers.append(torch.nn.Conv2d(self.dim_3, self.embedding_dim, kernel_size=[1, 1]))
+                else:
+                    pass
+                    # logging.warrning('')
+
+            self.feature_emb = torch.nn.ModuleList(embedding_layers)
 
         if self.byol_embedding_path is not None:
             self.load_pretrained_byol(self.byol_embedding_path)
 
     def forward(self, x):
-        x = self.body(x)["0"]
+        x = self.body(x)
+
         # x = self.net(x)
         if self.embedding_dim is not None:
-            x = self._conv1(x)
+            x = [self.feature_emb[i](x[str(i)]) for i in range(len(self.layers_returned))]
+        else:
+            x = [x[str(i)] for i in range(len(self.layers_returned))]
+
         if self.flatten_embedding:
-            x = x.permute(0, 2, 3, 1)
-            x = x.view(x.size(0), -1, x.size(-1))
+            x = [y.permute(0, 2, 3, 1).reshape(y.size(0), -1, y.size(1)) for y in x]
         return x
 
     @classmethod
@@ -135,7 +165,7 @@ class Encoder(nn.Module):
         )
         parser.add_argument("--byol_embedding_path", type=str)
         parser.add_argument("--use_frozen_batch_norm", action="store_true")
-
+        parser.add_argument("--layers_returned", nargs="+", default=["layer4"])
         return parser
 
     def load_pretrained_byol(self, path_checkpoint):

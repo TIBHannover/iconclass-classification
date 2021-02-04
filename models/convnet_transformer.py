@@ -71,7 +71,7 @@ class ConvnetTransformer(BaseModel):
         self.embedding_dim = 128
         # self.max_vocab_size = max(self.vocabulary_size)
         self.encoder = Encoder(args, embedding_dim=None, flatten_embedding=False)
-        self.encoder_dim = self.encoder.dim
+        self.encoder_dim = self.encoder.dim[0]
         self.decoder = Decoder(self.vocabulary_size, self.embedding_dim, self.embedding_dim, self.max_vocab_size)
         hidden_dim = self.decoder.hidden_dim
         self.pos_embedding = PositionEmbeddingSine(hidden_dim // 2, normalize=True)
@@ -102,7 +102,7 @@ class ConvnetTransformer(BaseModel):
         source = batch["source_id_sequence"]
         parents = batch["parents"]
 
-        image_embedding = self.encoder(image)
+        image_embedding = self.encoder(image)[0]
         # print(image_embedding.shape)
         image_mask = F.interpolate(image_mask[None].float(), size=image_embedding.shape[-2:]).to(torch.bool)[0]
 
@@ -126,7 +126,6 @@ class ConvnetTransformer(BaseModel):
         # print(torch.mean(loss))
         total_loss = loss / len(target)
 
-
         # print(torch.mean(loss))
         loss = total_loss
         return {"loss": torch.mean(loss), "predictions": predictions, "targets": target}
@@ -149,7 +148,7 @@ class ConvnetTransformer(BaseModel):
         source = batch["source_id_sequence"]
         parents = batch["parents"]
 
-        image_embedding = self.encoder(image)
+        image_embedding = self.encoder(image)[0]
         # print(image_embedding.shape)
         image_mask = F.interpolate(image_mask[None].float(), size=image_embedding.shape[-2:]).to(torch.bool)[0]
 

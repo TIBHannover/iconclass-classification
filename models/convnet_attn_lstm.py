@@ -71,7 +71,6 @@ class ConvnetAttnLstm(BaseModel):
         self.attention_dim = 128
         # self.max_vocab_size = max(self.vocabulary_size)
         self.encoder = Encoder(args, embedding_dim=self.embedding_dim, flatten_embedding=True)
-        self.encoder_dim = self.encoder.dim
         self.decoder = Decoder(
             self.vocabulary_size, self.embedding_dim, self.attention_dim, self.embedding_dim, self.max_vocab_size
         )
@@ -102,6 +101,8 @@ class ConvnetAttnLstm(BaseModel):
         # print(image.shape)
         # forward image
         image_embedding = self.encoder(image)
+
+        image_embedding = torch.cat(image_embedding, dim=1)
         # print(image_embedding.shape)
         # print('*********')
         # print(image_embedding.shape)
@@ -143,8 +144,8 @@ class ConvnetAttnLstm(BaseModel):
         self.log("train/loss", outputs["loss"].mean(), prog_bar=True)
         if (self.global_step % self.trainer.log_every_n_steps) == 0:
             for i, (pred, target) in enumerate(zip(outputs["predictions"], outputs["targets"])):
-                self.logger.experiment.add_histogram(f"predict_{i}", pred, self.global_step)
-                self.logger.experiment.add_histogram(f"target_{i}", target, self.global_step)
+                self.logger.experiment.add_histogram(f"train/predict_{i}", pred, self.global_step)
+                self.logger.experiment.add_histogram(f"train/target_{i}", target, self.global_step)
 
         return {"loss": outputs["loss"].mean()}
 
@@ -159,6 +160,8 @@ class ConvnetAttnLstm(BaseModel):
         # print(image.shape)
         # forward image
         image_embedding = self.encoder(image)
+
+        image_embedding = torch.cat(image_embedding, dim=1)
         # print('*********')
         # print(image_embedding.shape)
         # return loss
@@ -281,11 +284,11 @@ class ConvnetAttnLstm(BaseModel):
     def infer_step(self, batch, k=10):
         image = batch["image"]
         image_embedding = self.encoder(image)
-        self.diverse_beam_search(image_embedding, num_groups = 10, diversity_strength = -0.2, beam_size =10)
+        self.diverse_beam_search(image_embedding, num_groups=10, diversity_strength=-0.2, beam_size=10)
         self.old_beam_search(image_embedding)
-        
-    def diverse_beam_search(self, image_embedding, num_groups = 5, diversity_strength = -0.2, beam_size =10):
-        
+
+    def diverse_beam_search(self, image_embedding, num_groups=5, diversity_strength=-0.2, beam_size=10):
+
         encoder_dim = image_embedding.size(2)
         # Flatten encoding
         num_pixels = image_embedding.size(1)
@@ -293,8 +296,8 @@ class ConvnetAttnLstm(BaseModel):
         image_embedding = image_embedding.expand(beam_size, num_pixels, encoder_dim)  # (k, num_pixels, encoder_dim)
         decoder_inp = torch.ones([beam_size, 1], dtype=torch.int64).to(image_embedding.device.index)
         hidden = self.decoder.reset_state(beam_size).to(image_embedding.device.index)
-        
-        final_scores =torch.zeros(beam_size, 1).to(image_embedding.device.index)
+
+        final_scores = torch.zeros(beam_size, 1).to(image_embedding.device.index)
         final_beams = torch.ones([beam_size, 1], dtype=torch.int64).to(image_embedding.device.index)
         final_indices = []
         for i_lev in range(len(self.classifier_config)):
@@ -303,48 +306,39 @@ class ConvnetAttnLstm(BaseModel):
             predictions_prob = torch.sigmoid(predictions)
             lprobs = torch.log(predictions_prob)
             scores = final_scores
-            #diverse beam search
+            # diverse beam search
             beam_size, vocab_size = lprobs.size()
 
             # initialize diversity penalty
             diversity_buf = torch.zeros(lprobs[0, :].size()).to(lprobs)
             scores_G, indices_G, beams_G = [], [], []
             for g in range(num_groups):
-                lprobs_g = lprobs[g :: num_groups, :]
-                scores_g = scores[g :: num_groups] 
+                lprobs_g = lprobs[g::num_groups, :]
+                scores_g = scores[g::num_groups]
 
                 # apply diversity penalty
-                lprobs_g = torch.add(
-                    lprobs_g,
-                    other=diversity_buf.unsqueeze(0),
-                    alpha=diversity_strength,
-                )
-    
-    
-                scores_buf, indices_buf, beams_buf = self.simple_beam_search(
-                    i_lev, lprobs_g, scores_g)
-                
-                beams_buf.mul_(num_groups).add_(g) 
-    
+                lprobs_g = torch.add(lprobs_g, other=diversity_buf.unsqueeze(0), alpha=diversity_strength,)
+
+                scores_buf, indices_buf, beams_buf = self.simple_beam_search(i_lev, lprobs_g, scores_g)
+
+                beams_buf.mul_(num_groups).add_(g)
+
                 scores_G.append(scores_buf.clone())
                 indices_G.append(indices_buf.clone())
                 beams_G.append(beams_buf.clone())
-    
+
                 # update diversity penalty
-                diversity_buf.scatter_add_(
-                    0, indices_buf, torch.ones(indices_buf.size()).to(diversity_buf)
-                )
-            prev_word_inds = torch.stack(beams_G, dim = 0).view(beam_size, -1)
+                diversity_buf.scatter_add_(0, indices_buf, torch.ones(indices_buf.size()).to(diversity_buf))
+            prev_word_inds = torch.stack(beams_G, dim=0).view(beam_size, -1)
             # print(prev_word_inds)
-            final_scores = torch.stack(scores_G, dim= 0).view(beam_size, -1)
-            next_word_inds = torch.stack(indices_G, dim =0).view(beam_size, -1)  
+            final_scores = torch.stack(scores_G, dim=0).view(beam_size, -1)
+            next_word_inds = torch.stack(indices_G, dim=0).view(beam_size, -1)
             # print(next_word_inds)
-            final_beams = torch.cat([final_beams[prev_word_inds].squeeze(1), next_word_inds], dim =-1)
+            final_beams = torch.cat([final_beams[prev_word_inds].squeeze(1), next_word_inds], dim=-1)
         print(final_beams)
-        final_beams = list(map(lambda l:l[1:], final_beams))
+        final_beams = list(map(lambda l: l[1:], final_beams))
         print(self.seq2str(final_beams))
-        
-        
+
     def simple_beam_search(self, step, lprobs, scores):
         beam_size, vocab_size = lprobs.size()
         lprobs = lprobs + scores
@@ -353,8 +347,8 @@ class ConvnetAttnLstm(BaseModel):
         indices_buf = top_prediction[1]
         beams_buf = indices_buf // vocab_size
         indices_buf = indices_buf.fmod(vocab_size)
-        return scores_buf, indices_buf,beams_buf
-    
+        return scores_buf, indices_buf, beams_buf
+
     def old_beam_search(self, image_embedding, k=10):
 
         #
@@ -395,14 +389,16 @@ class ConvnetAttnLstm(BaseModel):
 
             predictions_prob = torch.sigmoid(predictions)
             # print(predictions_prob.shape)
-            
+
             # print(predictions_prob)
             # print('*************')
             # print('*************')
-            
+
             # print('*************')
             # print('*************')
-            predictions_prob = top_k_scores.expand_as(predictions_prob) + predictions_prob#/predictions_prob.max(0, keepdim=True)[0]  # (s, vocab_size)
+            predictions_prob = (
+                top_k_scores.expand_as(predictions_prob) + predictions_prob
+            )  # /predictions_prob.max(0, keepdim=True)[0]  # (s, vocab_size)
             # print(predictions_prob.shape)
             # print(predictions_prob)
             # Get the top_k predictions
@@ -479,7 +475,6 @@ class ConvnetAttnLstm(BaseModel):
             seq = complete_seqs[i]
 
         print(seqs)
-       
 
         # # References
         # img_caps = allcaps[0].tolist()
@@ -489,8 +484,8 @@ class ConvnetAttnLstm(BaseModel):
         # references.append(img_captions)
 
         # Hypotheses
-        #delete the first column in the generated seq
-        seqs = list(map(lambda l:l[1:], seqs))
+        # delete the first column in the generated seq
+        seqs = list(map(lambda l: l[1:], seqs))
         # print(seqs)
         # print('******')
         # for ii in range(len(self.classifier_config)):
@@ -498,7 +493,7 @@ class ConvnetAttnLstm(BaseModel):
         # print(self.classifier_config)
 
         print(self.seq2str(seqs))
-        
+
         # result_idx = [
         #     w for w in seq if w not in {self.dictionary["<start>"], self.dictionary["<end>"], self.dictionary["<pad>"]}
         # ]
@@ -536,19 +531,19 @@ class ConvnetAttnLstm(BaseModel):
         #     )
 
         # return {"loss": loss, "perplexity": perplexity, "gt_str": gt_str, "pred_str": result_str}
-        
+
     def seq2str(self, seqs):
-        # reverse the indexes in dictionary to the string labels 
+        # reverse the indexes in dictionary to the string labels
         final_lbs = list()
         for seq in seqs:
-            label_hirarchy = list() 
+            label_hirarchy = list()
             for i_lev in range(len(seq)):
-                label_hirarchy.append(self.classifier_config[i_lev]['tokenizer'][seq[i_lev]])
-                
+                label_hirarchy.append(self.classifier_config[i_lev]["tokenizer"][seq[i_lev]])
+
             # print(''.join(label_hirarchy))
-            final_lbs.append(''.join(label_hirarchy))
+            final_lbs.append("".join(label_hirarchy))
         return final_lbs
-    
+
     @classmethod
     def add_args(cls, parent_parser):
         parent_parser = super().add_args(parent_parser)
@@ -642,8 +637,9 @@ class Decoder(nn.Module):
         # print(context_vec.shape)
         x = torch.cat([context_vec.unsqueeze(1), x], dim=2)
         # print('before gru {}'.format(x.shape))
-
-        output, state = self.gru(x.permute(1, 0, 2))
+        # print(f"{level} {hidden.shape}")
+        # print(hidden)
+        output, state = self.gru(x.permute(1, 0, 2), hidden.unsqueeze(0))
         # print('output after gru {}'.format(output.shape))
 
         output = output.permute(1, 0, 2)
@@ -662,3 +658,9 @@ class Decoder(nn.Module):
 
     def reset_state(self, batch_size):
         return torch.zeros((batch_size, self.attention_dim))
+
+    # def init_hidden_state(self, encoder_out):
+
+    #     mean_encoder_out = encoder_out.mean(dim=1)
+    #     h = self.init_h(mean_encoder_out)
+    #     return h

@@ -257,7 +257,13 @@ class ConvnetTransformer(BaseModel):
     @auto_move_data
     def infer_step(self, batch, k=10):
         image = batch["image"]
-        image_embedding = self.encoder(image)
+        image_mask = batch["image_mask"]
+        print(image.shape)
+        image_embedding = self.encoder(image)[0]
+        pos = self.pos_embedding(image, image_mask)
+
+        image_embedding = self.input_proj(image_embedding)
+        print(image_embedding)
 
         self.beam_search(image_embedding)
 

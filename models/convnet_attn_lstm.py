@@ -107,11 +107,12 @@ class ConvnetAttnLstm(BaseModel):
         # print('*********')
         # print(image_embedding.shape)
         # return loss
-        hidden = self.decoder.reset_state(image.shape[0]).to(image.device.index)
+        # hidden = self.decoder.reset_state(image.shape[0]).to(image.device.index)
+        hidden = self.decoder.init_hidden_state(image_embedding)
         # print(hidden.device)
 
         # Feed <START> to the model in the first layer 1==<START>
-        decoder_inp = torch.ones([image.shape[0], 1], dtype=torch.int64).to(image.device.index)
+        decoder_inp = torch.ones([image.shape[0]], dtype=torch.int64).to(image.device.index)
         # print('#########################')
         # print(decoder_inp)
         loss = 0
@@ -129,7 +130,7 @@ class ConvnetAttnLstm(BaseModel):
             # print('#########################')
             # print(target[i_lev].shape)
             loss += torch.mean(self.loss(predictions, target[i_lev]))
-            decoder_inp = torch.unsqueeze(source[i_lev], dim=1)
+            decoder_inp = source[i_lev]
             # print(decoder_inp.shape)
             # decoder_inp = torch.tensor(target[i_lev]).to(torch.int64).to(image.device.index)
         # print('#########################')
@@ -165,11 +166,13 @@ class ConvnetAttnLstm(BaseModel):
         # print('*********')
         # print(image_embedding.shape)
         # return loss
-        hidden = self.decoder.reset_state(image.shape[0]).to(image.device.index)
+        # hidden = self.decoder.reset_state(image.shape[0]).to(image.device.index)
+
+        hidden = self.decoder.init_hidden_state(image_embedding)
         # print(hidden.device)
 
         # Feed <START> to the model in the first layer 1==<START>
-        decoder_inp = torch.ones([image.shape[0], 1], dtype=torch.int64).to(image.device.index)
+        decoder_inp = torch.ones([image.shape[0]], dtype=torch.int64).to(image.device.index)
         # print('#########################')
         # print(decoder_inp)
         loss = 0
@@ -201,7 +204,7 @@ class ConvnetAttnLstm(BaseModel):
                 predictions, hidden, _ = self.decoder(decoder_inp, image_embedding, hidden, i_lev)
 
                 loss += torch.mean(self.loss(predictions, target[i_lev]))
-                decoder_inp = torch.unsqueeze(source[i_lev], dim=1)
+                decoder_inp = source[i_lev]
 
                 source_indexes, target_indexes = self.map_level_prediction(parents_lvl)
 
@@ -604,7 +607,8 @@ class Decoder(nn.Module):
         self.embedding = nn.ModuleList(
             [nn.Embedding(max_vocab_size, embedding_dim) for x in range(len(vocabulary_size))]
         )
-        self.gru = nn.GRU(embedding_dim + encoder_dim, attention_dim, bias=True)
+        self.gru = nn.GRUCell(embedding_dim + encoder_dim, attention_dim, bias=True)
+        self.init_h = nn.Linear(embedding_dim, attention_dim)
         # Todo add more linear layers Todo add kernel regulizer
         self.fc1 = nn.Linear(attention_dim, attention_dim)
 
@@ -625,28 +629,37 @@ class Decoder(nn.Module):
         #caption_lengths: caption lengths, a tensor of dimension (batch_size, 1)
         return: scores for vocabulary, sorted encoded captions, decode lengths, weights, sort indices
         """
+        # print("#############################")
+        # print(f"image_emb: {encoder_out.shape}")
+
+        # print(f"hidden: {hidden.shape}")
+        # print(f"x: {x.shape}")
         context_vec, attention_weights = self.attention(encoder_out, hidden)
 
         # print(level)
         # print(x.shape)
         if level < 9:
             x = self.embedding[level](x)
+        # print(f"emb: {x.shape}")
+        # print(f"context: {context_vec.shape}")
         # else:??
         #    x = self.embedding[7](decoder_inp)
         # print(x.shape)
         # print(context_vec.shape)
-        x = torch.cat([context_vec.unsqueeze(1), x], dim=2)
+        x = torch.cat([context_vec, x], dim=1)
         # print('before gru {}'.format(x.shape))
         # print(f"{level} {hidden.shape}")
         # print(hidden)
-        output, state = self.gru(x.permute(1, 0, 2), hidden.unsqueeze(0))
+        # print(x.shape)
+        output = self.gru(x, hidden)
+        # print(output.shape)
         # print('output after gru {}'.format(output.shape))
 
-        output = output.permute(1, 0, 2)
-        state = state.squeeze(0)
+        # output = output.permute(1, 0, 2)
+
         # print('state after gru {}'.format(state.shape))
         x = self.fc1(output)
-        x = torch.reshape(x, (-1, x.size()[2]))
+        # x = torch.reshape(x, (-1, x.size()[2]))
         # print('after gru reshape {}'.format(x.shape))
         if level < 9:
             x = self.fc3[level](x)
@@ -654,13 +667,12 @@ class Decoder(nn.Module):
         #    x = self.fc2[7](x)
         #    x = self.fc3[7](x)
         # print('output of decoder{}'.format(x.shape))
-        return x, state, attention_weights
+        return x, output, attention_weights
 
     def reset_state(self, batch_size):
         return torch.zeros((batch_size, self.attention_dim))
 
-    # def init_hidden_state(self, encoder_out):
-
-    #     mean_encoder_out = encoder_out.mean(dim=1)
-    #     h = self.init_h(mean_encoder_out)
-    #     return h
+    def init_hidden_state(self, encoder_out):
+        mean_encoder_out = encoder_out.mean(dim=1)
+        h = self.init_h(mean_encoder_out)  # (batch_size, decoder_dim)
+        return h

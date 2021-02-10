@@ -183,7 +183,7 @@ class ConvnetAttnLstm(BaseModel):
 
                 prediction_size = len(self.classifier_config[i_lev]["tokenizer"])
 
-                target_lev = target[:, 0, i_lev, :prediction_size]
+                target_lev = target[:, 0, i_lev, :prediction_size] #loop over the max_seq
                 loss += torch.mean(self.loss(predictions, target_lev))
                 decoder_inp = torch.unsqueeze(source[:, 0, i_lev], dim=1)
 
@@ -281,7 +281,107 @@ class ConvnetAttnLstm(BaseModel):
         self.log("val/loss", loss / count, prog_bar=True)
 
     def test_step(self, batch, batch_idx):
-        pass
+        image = batch["image"]
+        source = batch["source_id_sequence"]
+        target = batch["target_vec"]
+        parents = batch["parents"]
+        # image = F.interpolate(image, size = (299,299), mode= 'bicubic', align_corners=False)
+        # print(image.shape)
+        # forward image
+        image_embedding = self.encoder(image)
+        # print('*********')
+        # print(image_embedding.shape)
+        # return loss
+        hidden = self.decoder.reset_state(image.shape[0]).to(image.device.index)
+        # print(hidden.device)
+
+        # Feed <START> to the model in the first layer 1==<START>
+        decoder_inp = torch.ones([image.shape[0], 1], dtype=torch.int64).to(image.device.index)
+        # print('#########################')
+        # print(decoder_inp)
+        loss = 0
+        # Check if batch contains all traces (target [BATCH_SIZE, MAX_SEQUENCE, LEVEL, MAX_CLASSIFIER])
+        if "mask" in batch:
+            for i_lev in range(target.shape[2]):
+                predictions, hidden, _ = self.decoder(decoder_inp, image_embedding, hidden, i_lev)
+
+                prediction_size = len(self.classifier_config[i_lev]["tokenizer"])
+
+                target_lev = target[:, 0, i_lev, :prediction_size]
+                loss += torch.mean(self.loss(predictions, target_lev))
+                decoder_inp = torch.unsqueeze(source[:, 0, i_lev], dim=1)
+
+        else:
+
+            flat_prediction = torch.zeros(image.shape[0], len(self.mapping_config), dtype=image_embedding.dtype).to(
+                image.device.index
+            )
+
+            flat_prediction_norm = torch.zeros(
+                image.shape[0], len(self.mapping_config), dtype=image_embedding.dtype
+            ).to(image.device.index)
+            flat_target = torch.zeros(image.shape[0], len(self.mapping_config), dtype=target[0].dtype).to(
+                image.device.index
+            )
+            parents_lvl = [None] * image.shape[0]
+            for i_lev in range(len(target)):
+                predictions, hidden, _ = self.decoder(decoder_inp, image_embedding, hidden, i_lev)
+
+                loss += torch.mean(self.loss(predictions, target[i_lev]))
+                decoder_inp = torch.unsqueeze(source[i_lev], dim=1)
+
+                source_indexes, target_indexes = self.map_level_prediction(parents_lvl)
+
+                flat_prediction[target_indexes] = torch.sigmoid(predictions)[source_indexes]
+                # Compute normalized version (maxprediction == 1.)
+                flat_prediction_norm[target_indexes] = torch.sigmoid(predictions)[source_indexes] / torch.max(
+                    torch.sigmoid(predictions)
+                )
+
+                flat_target[target_indexes] = target[i_lev][source_indexes]
+
+                parents_lvl = parents[i_lev]
+
+            self.f1_test(flat_prediction, flat_target)
+            self.f1_test_norm(flat_prediction_norm, flat_target)
+
+        return {
+            "loss": loss,
+        }
+    
+    def test_epoch_end(self, outputs):
+
+        loss = 0.0
+        count = 0
+        for output in outputs:
+            loss += output["loss"]
+            count += 1
+
+        # f1score prediction
+        f1_score = self.f1_test.compute().cpu().detach()
+        self.log("test/f1", np.nanmean(f1_score), prog_bar=True)
+
+        level_results = {}
+        for i, x in enumerate(self.mapping_config):
+            if len(x["parents"]) not in level_results:
+                level_results[len(x["parents"])] = []
+            level_results[len(x["parents"])].append(f1_score[x["index"]])
+        for depth, x in sorted(level_results.items(), key=lambda x: x[0]):
+            self.log(f"test/f1_{depth}", np.nanmean(torch.stack(x, dim=0)), prog_bar=True)
+
+        # f1score each layer normalized prediction
+        f1_norm_score = self.f1_test_norm.compute().cpu().detach()
+        self.log("test/f1_norm", np.nanmean(f1_norm_score), prog_bar=True)
+
+        level_results = {}
+        for i, x in enumerate(self.mapping_config):
+            if len(x["parents"]) not in level_results:
+                level_results[len(x["parents"])] = []
+            level_results[len(x["parents"])].append(f1_norm_score[x["index"]])
+        for depth, x in sorted(level_results.items(), key=lambda x: x[0]):
+            self.log(f"test/f1_norm_{depth}", np.nanmean(torch.stack(x, dim=0)), prog_bar=True)
+
+        self.log("test/loss", loss / count, prog_bar=True)
 
     @auto_move_data
     def infer_step(self, batch, k=10):

@@ -45,6 +45,7 @@ class ConvnetTransformer(BaseModel):
         self.use_focal_loss = dict_args.get("use_focal_loss", None)
         self.focal_loss_gamma = dict_args.get("focal_loss_gamma", None)
         self.focal_loss_alpha = dict_args.get("focal_loss_alpha", None)
+        self.filter_label_by_count = dict_args.get("filter_label_by_count", None)
 
         self.mapping_config = []
         if self.mapping_path is not None:
@@ -218,6 +219,14 @@ class ConvnetTransformer(BaseModel):
         return np.swapaxes(source_indexes, 0, 1), np.swapaxes(target_indexes, 0, 1)
 
     def validation_epoch_end(self, outputs):
+        if self.filter_label_by_count is not None and self.filter_label_by_count > 0:
+            mask = torch.zeros(len(self.mapping_config), dtype=torch.bool)
+            for x in self.mapping_config:
+                mask[x["index"]] = True if x["count"] > self.filter_label_by_count else False
+        else:
+            mask = torch.ones(len(self.mapping_config), dtype=torch.float32)
+
+        self.log("val/number_of_labels", torch.sum(mask), prog_bar=True)  # TODO False
 
         loss = 0.0
         count = 0
@@ -228,6 +237,8 @@ class ConvnetTransformer(BaseModel):
         # f1score prediction
         f1_score = self.f1_val.compute().cpu().detach()
         self.log("val/f1", np.nanmean(f1_score), prog_bar=True)
+        f1_score[~mask] = np.nan
+        self.log("val/f1_mask", np.nanmean(f1_score), prog_bar=True)
 
         level_results = {}
         for i, x in enumerate(self.mapping_config):
@@ -240,6 +251,8 @@ class ConvnetTransformer(BaseModel):
         # f1score each layer normalized prediction
         f1_norm_score = self.f1_val_norm.compute().cpu().detach()
         self.log("val/f1_norm", np.nanmean(f1_norm_score), prog_bar=True)
+        f1_norm_score[~mask] = np.nan
+        self.log("val/f1_norm_mask", np.nanmean(f1_norm_score), prog_bar=True)
 
         level_results = {}
         for i, x in enumerate(self.mapping_config):
@@ -258,182 +271,12 @@ class ConvnetTransformer(BaseModel):
     def infer_step(self, batch, k=10):
         image = batch["image"]
         image_mask = batch["image_mask"]
-        print(image.shape)
         image_embedding = self.encoder(image)[0]
         pos = self.pos_embedding(image, image_mask)
 
         image_embedding = self.input_proj(image_embedding)
-        print(image_embedding)
 
         self.beam_search(image_embedding)
-
-    def beam_search(self, image_embedding, k=10):
-
-        #
-        encoder_dim = image_embedding.size(2)
-
-        # Flatten encoding
-        num_pixels = image_embedding.size(1)
-
-        # We'll treat the problem as having a batch size of k
-        image_embedding = image_embedding.expand(k, num_pixels, encoder_dim)  # (k, num_pixels, encoder_dim)
-
-        decoder_inp = torch.ones([k, 1], dtype=torch.int64).to(image_embedding.device.index)
-        # Tensor to store top k previous words at each step; now they're just <start>
-        # decoder_inp = torch.LongTensor([[self.dictionary["<start>"]]] * k).to(image_embedding.device.index)  # (k, 1)
-
-        # Tensor to store top k sequences; now they're just <start>
-        seqs = decoder_inp  # (k, 1)
-
-        # Tensor to store top k sequences' scores; now they're just 0
-        top_k_scores = torch.zeros(k, 1).to(image_embedding.device.index)  # (k, 1)
-
-        # Lists to store completed sequences and scores
-        complete_seqs = list()
-        complete_seqs_scores = list()
-
-        # Start decoding
-        # step = 1
-        # h, c = self.decoder.init_hidden_state(image_embedding)
-
-        hidden = self.decoder.reset_state(k).to(image_embedding.device.index)
-
-        # s is a number less than or equal to k, because sequences are removed from this process once they hit <end>
-        # while True:
-
-        for i_lev in range(len(self.classifier_config)):
-            lev_dictionary = self.classifier_config[i_lev]["tokenizer"]
-            predictions, hidden, _ = self.decoder(decoder_inp, image_embedding, hidden, i_lev)
-
-            predictions_prob = torch.sigmoid(predictions)
-            # print(predictions_prob.shape)
-            # print(predictions_prob)
-
-            predictions_prob = top_k_scores.expand_as(predictions_prob) + predictions_prob  # (s, vocab_size)
-            # print(predictions_prob.shape)
-            # print(predictions_prob)
-            # Get the top_k predictions
-            if i_lev == 0:
-                top_k_scores, top_k_words = predictions_prob[0].topk(k, 0, True, True)
-            else:
-                # Unroll and find top scores, and their unrolled indices
-                top_k_scores, top_k_words = predictions_prob.view(-1).topk(k, 0, True, True)  # (s)
-
-            # print(top_k_scores)
-
-            # print(top_k_words)
-
-            # embeddings = self.decoder.embedding(decoder_inp).squeeze(1)  # (s, embed_dim)
-
-            # awe, _ = self.decoder.attention(image_embedding, h)  # (s, encoder_dim), (s, num_pixels)
-
-            # gate = self.decoder.sigmoid(self.decoder.f_beta(h))  # gating scalar, (s, encoder_dim)
-            # awe = gate * awe
-
-            # h, c = self.decoder.decode_step(torch.cat([embeddings, awe], dim=1), (h, c))  # (s, decoder_dim)
-
-            # scores = self.decoder.fc(h)  # (s, vocab_size)
-            # scores = F.log_softmax(scores, dim=1)
-            # print(scores)
-            # Add
-            # scores = top_k_scores.expand_as(scores) + scores  # (s, vocab_size)
-
-            # # For the first step, all k points will have the same scores (since same k previous words, h, c)
-            # if step == 1:
-            #     top_k_scores, top_k_words = scores[0].topk(k, 0, True, True)  # (s)
-            # else:
-            #     # Unroll and find top scores, and their unrolled indices
-            #     top_k_scores, top_k_words = scores.view(-1).topk(k, 0, True, True)  # (s)
-
-            # Convert unrolled indices to actual indices of scores
-            prev_word_inds = top_k_words // len(lev_dictionary)  # vocab_size  # (s)
-            next_word_inds = top_k_words % len(lev_dictionary)  # vocab_size  # (s)
-
-            # Add new words to sequences
-            seqs = torch.cat([seqs[prev_word_inds], next_word_inds.unsqueeze(1)], dim=1)  # (s, step+1)
-
-            # Which sequences are incomplete (didn't reach <end>)?
-            incomplete_inds = [
-                ind for ind, next_word in enumerate(next_word_inds) if next_word != lev_dictionary.index("#PAD")
-            ]
-            complete_inds = list(set(range(len(next_word_inds))) - set(incomplete_inds))
-
-            # Set aside complete sequences
-            if len(complete_inds) > 0:
-                complete_seqs.extend(seqs[complete_inds].tolist())
-                complete_seqs_scores.extend(top_k_scores[complete_inds])
-            k -= len(complete_inds)  # reduce beam length accordingly
-
-            # Proceed with incomplete sequences
-            if k == 0:
-                break
-            seqs = seqs[incomplete_inds]
-            hidden = hidden[prev_word_inds[incomplete_inds]]
-            # c = c[prev_word_inds[incomplete_inds]]
-            image_embedding = image_embedding[prev_word_inds[incomplete_inds]]
-            top_k_scores = top_k_scores[incomplete_inds].unsqueeze(1)
-            decoder_inp = next_word_inds[incomplete_inds].unsqueeze(1)
-            # print(top_k_scores)
-            # Break if things have been going on too long
-            # if step > 500:
-            #     break
-            # step += 1
-
-        if len(complete_seqs_scores) == 0:
-            seq = seqs[0].tolist()
-        else:
-            i = complete_seqs_scores.index(max(complete_seqs_scores))
-            seq = complete_seqs[i]
-
-        print(seqs)
-        print()
-
-        # # References
-        # img_caps = allcaps[0].tolist()
-        # img_captions = list(
-        #     map(lambda c: [w for w in c if w not in {self.dictionary['<start>'], self.dictionary['<end>'], self.dictionary['<pad>']}],
-        #         img_caps))  # remove <start> and pads
-        # references.append(img_captions)
-
-        # Hypotheses
-
-        result_idx = [
-            w for w in seq if w not in {self.dictionary["<start>"], self.dictionary["<end>"], self.dictionary["<pad>"]}
-        ]
-        result_str = [self.inv_dictionary[w] for w in result_idx]
-
-        gt = batch["sequence"].squeeze(0).cpu().numpy().tolist()
-
-        gt_idx = [
-            w for w in gt if w not in {self.dictionary["<start>"], self.dictionary["<end>"], self.dictionary["<pad>"]}
-        ]
-        gt_str = [self.inv_dictionary[w] for w in gt_idx]
-
-        # print("########")
-        # print(gt_str)
-        # print(result_str)
-        # if self.params.test.prediction_output_path is not None:
-        #     image_out = os.path.join(self.params.test.prediction_output_path, "img")
-        #     gt_out = os.path.join(self.params.test.prediction_output_path, "gt")
-        #     res_out = os.path.join(self.params.test.prediction_output_path, "res")
-
-        #     os.makedirs(image_out, exist_ok=True)
-        #     os.makedirs(gt_out, exist_ok=True)
-        #     os.makedirs(res_out, exist_ok=True)
-
-        #     filename = os.path.splitext(os.path.basename(batch["path"][0]))[0]
-
-        #     with open(os.path.join(gt_out, f"{filename}.tex"), "w") as f:
-        #         f.write("$" + " ".join(gt_str) + "$\n")
-
-        #     with open(os.path.join(res_out, f"{filename}.tex"), "w") as f:
-        #         f.write("$" + " ".join(result_str) + "$\n")
-
-        #     imageio.imwrite(
-        #         os.path.join(image_out, f"{filename}.jpg"), batch["image"].squeeze(0).squeeze(0).cpu().numpy()
-        #     )
-
-        return {"loss": loss, "perplexity": perplexity, "gt_str": gt_str, "pred_str": result_str}
 
     @classmethod
     def add_args(cls, parent_parser):
@@ -447,6 +290,8 @@ class ConvnetTransformer(BaseModel):
         parser.add_argument("--use_focal_loss", action="store_true")
         parser.add_argument("--focal_loss_gamma", type=float, default=2)
         parser.add_argument("--focal_loss_alpha", type=float, default=0.25)
+
+        parser.add_argument("--filter_label_by_count", type=int, default=0)
 
         return parser
 
@@ -500,7 +345,10 @@ class Decoder(nn.Module):
         image_embedding = image_embedding + pos_embedding  # TODO detr only apply this on q and k
         # image_mask has to be inverted (zero -> content)
         decoder_output = self.transformer(
-            src=image_embedding, src_key_padding_mask=~mask, tgt=query_embedding, tgt_mask=tgt_mask,
+            src=image_embedding,
+            src_key_padding_mask=~mask,
+            tgt=query_embedding,
+            tgt_mask=tgt_mask,
         )
         # print(decoder_output.shape)
         decoder_output = decoder_output.permute(1, 0, 2)

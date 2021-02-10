@@ -38,6 +38,7 @@ class IconclassSequenceDecoderPipeline(Pipeline):
         last_trace=None,
         merge_one_hot=None,
         pad_max_shape=None,
+        filter_label_by_count=None,
     ):
         self.num_classes = num_classes
         self.annotation = annotation
@@ -47,6 +48,7 @@ class IconclassSequenceDecoderPipeline(Pipeline):
         self.last_trace = last_trace
         self.merge_one_hot = merge_one_hot
         self.pad_max_shape = pad_max_shape
+        self.filter_label_by_count = filter_label_by_count
 
     def call(self, datasets=None, **kwargs):
         def decode(sample):
@@ -60,23 +62,32 @@ class IconclassSequenceDecoderPipeline(Pipeline):
             for c in sample["classes"]:
                 class_vec = []
                 sequences = []
-                token_sequence = self.mapping[c]["token_id_sequence"]
+                token_id_sequence = self.mapping[c]["token_id_sequence"]
+
+                token_sequence = self.mapping[c]["parents"] + [c]
+                if self.filter_label_by_count is not None and self.filter_label_by_count > 0:
+                    counts = [self.mapping[x]["count"] for x in token_sequence]
+                    ignore_labels = [False if x > self.filter_label_by_count else True for x in counts]
+                else:
+                    ignore_labels = [False for x in token_sequence]
+
                 for l, classifier in enumerate(self.classifier):
+
                     one_hot = np.zeros([len(classifier["tokenizer"])])
-                    if l < len(token_sequence):
-                        one_hot[token_sequence[l]] = 1
+                    if l < len(token_id_sequence) and not ignore_labels[l]:
+                        one_hot[token_id_sequence[l]] = 1
                     else:
                         one_hot[classifier["tokenizer"].index("#PAD")] = 1
                     class_vec.append(one_hot)
 
-                    if l < len(token_sequence):
-                        sequences.append(token_sequence[l])
+                    if l < len(token_id_sequence) and not ignore_labels[l]:
+                        sequences.append(token_id_sequence[l])
                     else:
                         sequences.append(classifier["tokenizer"].index("#PAD"))
 
                 parents_sequence = []
                 for l, classifier in enumerate(self.classifier):
-                    if l < len(self.mapping[c]["parents"]):
+                    if l < len(self.mapping[c]["parents"]) and not ignore_labels[l]:
 
                         parents_sequence.append(self.mapping[c]["parents"][l])
                     else:
@@ -210,6 +221,7 @@ class IconclassSequenceDataloader(IconclassDataloader):
 
         self.mapping_path = dict_args.get("mapping_path", None)
         self.classifier_path = dict_args.get("classifier_path", None)
+        self.filter_label_by_count = dict_args.get("filter_label_by_count", None)
 
         self.mapping = {}
         if self.mapping_path is not None:
@@ -224,6 +236,10 @@ class IconclassSequenceDataloader(IconclassDataloader):
 
         self.val_last_trace = dict_args.get("val_last_trace", None)
         self.val_pad_max_shape = dict_args.get("val_pad_max_shape", None)
+
+        self.test_last_trace = dict_args.get("test_last_trace", None)
+        self.test_pad_max_shape = dict_args.get("test_pad_max_shape", None)
+
         self.pad_id = None
         for classifier in self.classifier:
             if self.pad_id is None:
@@ -238,6 +254,7 @@ class IconclassSequenceDataloader(IconclassDataloader):
             classifier=self.classifier,
             random_trace=self.train_random_trace,
             merge_one_hot=self.train_merge_one_hot,
+            filter_label_by_count=self.filter_label_by_count,
         )
 
     def val_mapping_pipeline(self):
@@ -247,10 +264,17 @@ class IconclassSequenceDataloader(IconclassDataloader):
             last_trace=self.val_last_trace,
             merge_one_hot=self.train_merge_one_hot,
             pad_max_shape=self.val_pad_max_shape,
+            filter_label_by_count=self.filter_label_by_count,
         )
 
     def test_mapping_pipeline(self):
-        return IconclassSequenceDecoderPipeline(mapping=self.mapping, classifier=self.classifier)
+        return IconclassSequenceDecoderPipeline(
+            mapping=self.mapping,
+            classifier=self.classifier,
+            last_trace=self.test_last_trace,
+            pad_max_shape=self.test_pad_max_shape,
+            filter_label_by_count=self.filter_label_by_count,
+        )
 
     @classmethod
     def add_args(cls, parent_parser):
@@ -259,11 +283,15 @@ class IconclassSequenceDataloader(IconclassDataloader):
 
         parser.add_argument("--mapping_path", type=str)
         parser.add_argument("--classifier_path", type=str)
+        parser.add_argument("--filter_label_by_count", type=int, default=0)
 
         parser.add_argument("--train_random_trace", action="store_true")
         parser.add_argument("--train_merge_one_hot", action="store_true")
 
         parser.add_argument("--val_last_trace", action="store_true")
         parser.add_argument("--val_pad_max_shape", action="store_true")
+
+        parser.add_argument("--test_last_trace", action="store_true")
+        parser.add_argument("--test_pad_max_shape", action="store_true")
 
         return parser

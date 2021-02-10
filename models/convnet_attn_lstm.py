@@ -42,6 +42,7 @@ class ConvnetAttnLstm(BaseModel):
         self.use_focal_loss = dict_args.get("use_focal_loss", None)
         self.focal_loss_gamma = dict_args.get("focal_loss_gamma", None)
         self.focal_loss_alpha = dict_args.get("focal_loss_alpha", None)
+        self.filter_label_by_count = dict_args.get("filter_label_by_count", None)
 
         self.mapping_config = []
         if self.mapping_path is not None:
@@ -183,7 +184,7 @@ class ConvnetAttnLstm(BaseModel):
 
                 prediction_size = len(self.classifier_config[i_lev]["tokenizer"])
 
-                target_lev = target[:, 0, i_lev, :prediction_size] #loop over the max_seq
+                target_lev = target[:, 0, i_lev, :prediction_size]  # loop over the max_seq
                 loss += torch.mean(self.loss(predictions, target_lev))
                 decoder_inp = torch.unsqueeze(source[:, 0, i_lev], dim=1)
 
@@ -248,6 +249,15 @@ class ConvnetAttnLstm(BaseModel):
 
     def validation_epoch_end(self, outputs):
 
+        if self.filter_label_by_count is not None and self.filter_label_by_count > 0:
+            mask = torch.zeros(len(self.mapping_config), dtype=torch.bool)
+            for x in self.mapping_config:
+                mask[x["index"]] = True if x["count"] > self.filter_label_by_count else False
+        else:
+            mask = torch.ones(len(self.mapping_config), dtype=torch.float32)
+
+        self.log("val/number_of_labels", torch.sum(mask), prog_bar=True)  # TODO False
+
         loss = 0.0
         count = 0
         for output in outputs:
@@ -257,6 +267,8 @@ class ConvnetAttnLstm(BaseModel):
         # f1score prediction
         f1_score = self.f1_val.compute().cpu().detach()
         self.log("val/f1", np.nanmean(f1_score), prog_bar=True)
+        f1_score[~mask] = np.nan
+        self.log("val/f1_mask", np.nanmean(f1_score), prog_bar=True)
 
         level_results = {}
         for i, x in enumerate(self.mapping_config):
@@ -269,6 +281,8 @@ class ConvnetAttnLstm(BaseModel):
         # f1score each layer normalized prediction
         f1_norm_score = self.f1_val_norm.compute().cpu().detach()
         self.log("val/f1_norm", np.nanmean(f1_norm_score), prog_bar=True)
+        f1_norm_score[~mask] = np.nan
+        self.log("val/f1_norm_mask", np.nanmean(f1_norm_score), prog_bar=True)
 
         level_results = {}
         for i, x in enumerate(self.mapping_config):
@@ -348,7 +362,7 @@ class ConvnetAttnLstm(BaseModel):
         return {
             "loss": loss,
         }
-    
+
     def test_epoch_end(self, outputs):
 
         loss = 0.0
@@ -420,7 +434,11 @@ class ConvnetAttnLstm(BaseModel):
                 scores_g = scores[g::num_groups]
 
                 # apply diversity penalty
-                lprobs_g = torch.add(lprobs_g, other=diversity_buf.unsqueeze(0), alpha=diversity_strength,)
+                lprobs_g = torch.add(
+                    lprobs_g,
+                    other=diversity_buf.unsqueeze(0),
+                    alpha=diversity_strength,
+                )
 
                 scores_buf, indices_buf, beams_buf = self.simple_beam_search(i_lev, lprobs_g, scores_g)
 
@@ -660,6 +678,7 @@ class ConvnetAttnLstm(BaseModel):
         parser.add_argument("--focal_loss_gamma", type=float, default=2)
         parser.add_argument("--focal_loss_alpha", type=float, default=0.25)
 
+        parser.add_argument("--filter_label_by_count", type=int, default=0)
         return parser
 
 

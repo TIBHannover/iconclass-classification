@@ -303,6 +303,7 @@ class ConvnetAttnLstm(BaseModel):
         # print(image.shape)
         # forward image
         image_embedding = self.encoder(image)
+        image_embedding = torch.cat(image_embedding, dim=1)
         # print('*********')
         # print(image_embedding.shape)
         # return loss

@@ -148,8 +148,8 @@ class ImageDataset(Dataset):
 
                 yield {"image": image, "path": key}
 
-    # def __len__(self):
-    #     return self.length
+    def __len__(self):
+        return self.length
 
 
 class ImagePipeline(Pipeline):
@@ -165,7 +165,12 @@ class ImagePipeline(Pipeline):
 
 class MsgPackDataset(Dataset):
     def __init__(
-        self, path, shuffle=True, sample_per_shard=1024, shard_re=r"shard_(\d+).msg", splitters=None,
+        self,
+        path,
+        shuffle=True,
+        sample_per_shard=1024,
+        shard_re=r"shard_(\d+).msg",
+        splitters=None,
     ):
         super(MsgPackDataset, self).__init__()
         self.path = path
@@ -209,8 +214,8 @@ class MsgPackDataset(Dataset):
                 for x in unpacker:
                     yield x
 
-    # def __len__(self):
-    #     return self.length
+    def __len__(self):
+        return self.length
 
 
 class MsgPackPipeline(Pipeline):
@@ -262,8 +267,8 @@ class CacheDataset(torch.utils.data.IterableDataset):
                 continue
             yield y
 
-    # def __len__(self):
-    #     return len(self.dataset)
+    def __len__(self):
+        return len(self.dataset)
 
 
 class CachePipeline(Pipeline):
@@ -293,8 +298,8 @@ class MapDataset(Dataset):
                 continue
             yield sample
 
-    # def __len__(self):
-    #     return len(self.dataset)
+    def __len__(self):
+        return len(self.dataset)
 
 
 class MapPipeline(Pipeline):
@@ -486,8 +491,8 @@ class ConcatPipeline(Pipeline):
                     for sample in pl:
                         yield sample
 
-            # def __len__(self):
-            #     return sum([len(d) for d in pls])
+            def __len__(self):
+                return sum([len(d) for d in pls])
 
         return Concat()
 
@@ -525,8 +530,8 @@ class ConcatShufflePipeline(Pipeline):
                         if all(all_done):
                             return
 
-            # def __len__(self):
-            #     return sum([len(d) for d in pls])
+            def __len__(self):
+                return sum([len(d) for d in pls])
 
         return Concat()
 

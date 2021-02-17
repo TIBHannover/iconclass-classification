@@ -104,7 +104,7 @@ class IconclassDataloader:
                 torchvision.transforms.RandomHorizontalFlip(),
                 torchvision.transforms.RandomRotation(10),
                 RandomResize(self.train_random_sizes, max_size=self.max_size),
-                # torchvision.transforms.RandomResizedCrop(size=224, scale=(0.5, 1.0)),
+                # torchvision.transforms.RandomResizedCrop(size=224, scale=(0.5, 1.0)), #RandAugment CatOut
                 torchvision.transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.1),
                 torchvision.transforms.ToTensor(),
                 torchvision.transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
@@ -135,7 +135,7 @@ class IconclassDataloader:
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             drop_last=True,
-            collate_fn=PadCollate(pad_values={"image": 0.0, "image_mask": False}),
+            collate_fn=PadCollate(pad_values={"image": 0.0, "image_mask": False, "parents":"#PAD"}),
         )
         return dataloader
 
@@ -169,7 +169,7 @@ class IconclassDataloader:
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             drop_last=True,
-            collate_fn=PadCollate(pad_values={"image": 0.0, "image_mask": False}),
+            collate_fn=PadCollate(pad_values={"image": 0.0, "image_mask": False, "parents":"#PAD"}),
         )
         return dataloader
 
@@ -177,8 +177,7 @@ class IconclassDataloader:
         transforms = torchvision.transforms.Compose(
             [
                 torchvision.transforms.ToPILImage(),
-                torchvision.transforms.Resize(size=224),
-                torchvision.transforms.CenterCrop(size=224),
+                RandomResize([self.val_size], max_size=self.max_size),
                 torchvision.transforms.ToTensor(),
                 torchvision.transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
             ]
@@ -202,7 +201,8 @@ class IconclassDataloader:
         )
 
         dataloader = torch.utils.data.DataLoader(
-            pipeline(), batch_size=self.batch_size, num_workers=self.num_workers, pin_memory=True
+            pipeline(), batch_size=self.batch_size, num_workers=self.num_workers, pin_memory=True,
+            collate_fn=PadCollate(pad_values={"image": 0.0, "image_mask": False, "parents":"#PAD"}),
         )
         return dataloader
 

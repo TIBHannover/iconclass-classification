@@ -89,6 +89,12 @@ class ConvnetAttnLstm(BaseModel):
             num_classes=len(self.mapping_config), multilabel=True, average=None
         )
 
+        self.f1_test = pl.metrics.classification.F1(num_classes=len(self.mapping_config), multilabel=True, average=None)
+
+        self.f1_test_norm = pl.metrics.classification.F1(
+            num_classes=len(self.mapping_config), multilabel=True, average=None
+        )
+
     def forward(self, x):
         return x
 
@@ -99,23 +105,17 @@ class ConvnetAttnLstm(BaseModel):
 
         self.image = image
         # image = F.interpolate(image, size = (299,299), mode= 'bicubic', align_corners=False)
-        # print(image.shape)
         # forward image
         image_embedding = self.encoder(image)
 
         image_embedding = torch.cat(image_embedding, dim=1)
-        # print(image_embedding.shape)
-        # print('*********')
-        # print(image_embedding.shape)
-        # return loss
+
         # hidden = self.decoder.reset_state(image.shape[0]).to(image.device.index)
         hidden = self.decoder.init_hidden_state(image_embedding)
-        # print(hidden.device)
 
         # Feed <START> to the model in the first layer 1==<START>
         decoder_inp = torch.ones([image.shape[0]], dtype=torch.int64).to(image.device.index)
-        # print('#########################')
-        # print(decoder_inp)
+
         loss = 0
         predictions_list = []
 
@@ -126,19 +126,13 @@ class ConvnetAttnLstm(BaseModel):
             #     f"Post: {torch.min(torch.sigmoid(predictions))} {torch.max(torch.sigmoid(predictions))} {torch.mean(torch.sigmoid(predictions))}"
             # )
             predictions_list.append(torch.sigmoid(predictions))
-            # print('#########################')
-            # print(predictions.shape)
-            # print('#########################')
-            # print(target[i_lev].shape)
+
             loss += torch.mean(self.loss(predictions, target[i_lev]))
             decoder_inp = source[i_lev]
-            # print(decoder_inp.shape)
             # decoder_inp = torch.tensor(target[i_lev]).to(torch.int64).to(image.device.index)
-        # print('#########################')
-        # print(predictions.shape)
+
         total_loss = loss / len(target)
 
-        # print(torch.mean(loss))
         loss = total_loss
         return {"loss": torch.mean(loss), "predictions": predictions_list, "targets": target}
 
@@ -152,25 +146,20 @@ class ConvnetAttnLstm(BaseModel):
         return {"loss": outputs["loss"].mean()}
 
     def validation_step(self, batch, batch_idx):
-        # print(batch.keys())
-        # print(batch["parents"])
+
         image = batch["image"]
         source = batch["source_id_sequence"]
         target = batch["target_vec"]
         parents = batch["parents"]
         # image = F.interpolate(image, size = (299,299), mode= 'bicubic', align_corners=False)
-        # print(image.shape)
         # forward image
         image_embedding = self.encoder(image)
 
         image_embedding = torch.cat(image_embedding, dim=1)
-        # print('*********')
-        # print(image_embedding.shape)
-        # return loss
+
         # hidden = self.decoder.reset_state(image.shape[0]).to(image.device.index)
 
         hidden = self.decoder.init_hidden_state(image_embedding)
-        # print(hidden.device)
 
         # Feed <START> to the model in the first layer 1==<START>
         # print('#########################')
@@ -204,7 +193,6 @@ class ConvnetAttnLstm(BaseModel):
             for i_lev in range(len(target)):
                 decoder_inp = source[i_lev]
                 predictions, hidden, _ = self.decoder(decoder_inp, image_embedding, hidden, i_lev)
-
                 loss += torch.mean(self.loss(predictions, target[i_lev]))
 
                 source_indexes, target_indexes = self.map_level_prediction(parents_lvl)
@@ -218,12 +206,12 @@ class ConvnetAttnLstm(BaseModel):
                 flat_target[target_indexes] = target[i_lev][source_indexes]
 
                 parents_lvl = parents[i_lev]
-
+            total_loss = loss / len(target)
             self.f1_val(flat_prediction, flat_target)
             self.f1_val_norm(flat_prediction_norm, flat_target)
 
         return {
-            "loss": loss,
+            "loss": total_loss,
         }
 
     def map_level_prediction(self, parents):
@@ -299,34 +287,94 @@ class ConvnetAttnLstm(BaseModel):
         source = batch["source_id_sequence"]
         target = batch["target_vec"]
         parents = batch["parents"]
-        # image = F.interpolate(image, size = (299,299), mode= 'bicubic', align_corners=False)
-        # print(image.shape)
+        # TODO add threshold for each label and scale factor for levels prediction
         # forward image
         image_embedding = self.encoder(image)
         image_embedding = torch.cat(image_embedding, dim=1)
-        # print('*********')
-        # print(image_embedding.shape)
-        # return loss
-        hidden = self.decoder.reset_state(image.shape[0]).to(image.device.index)
+
+        # hidden = self.decoder.reset_state(image.shape[0]).to(image.device.index)
         # print(hidden.device)
 
-        # Feed <START> to the model in the first layer 1==<START>
-        decoder_inp = torch.ones([image.shape[0], 1], dtype=torch.int64).to(image.device.index)
-        # print('#########################')
-        # print(decoder_inp)
+        parents_lvl = [None] * image.shape[0]
+
         loss = 0
         # Check if batch contains all traces (target [BATCH_SIZE, MAX_SEQUENCE, LEVEL, MAX_CLASSIFIER])
         if "mask" in batch:
-            for i_lev in range(target.shape[2]):
-                predictions, hidden, _ = self.decoder(decoder_inp, image_embedding, hidden, i_lev)
 
-                prediction_size = len(self.classifier_config[i_lev]["tokenizer"])
+            flat_prediction = torch.zeros(image.shape[0], len(self.mapping_config), dtype=image_embedding.dtype).to(
+                image.device.index
+            )
+            flat_prediction_norm = torch.zeros(
+                image.shape[0], len(self.mapping_config), dtype=image_embedding.dtype
+            ).to(image.device.index)
+            flat_target = torch.zeros(image.shape[0], len(self.mapping_config), dtype=target[0].dtype).to(
+                image.device.index
+            )
+            flat_counter = torch.zeros(image.shape[0], len(self.mapping_config), dtype=target[0].dtype).to(
+                image.device.index
+            )
 
-                target_lev = target[:, 0, i_lev, :prediction_size]
-                loss += torch.mean(self.loss(predictions, target_lev))
-                decoder_inp = torch.unsqueeze(source[:, 0, i_lev], dim=1)
+            # iterate over pathes in the hierarchy for each image
+            for i_seq_mask in range(target.shape[1]):
+                hidden = self.decoder.init_hidden_state(image_embedding)
+                # Feed <START> to the model in the first layer 1==<START>
+                decoder_inp = torch.ones([image.shape[0]], dtype=torch.int64).to(image.device.index)
+                # build parents_list for each path
+                parents_per_hpath = []
+                for i_batch, seqs_list in enumerate(parents):
+                    if i_seq_mask < len(seqs_list):
+                        parents_per_hpath.append(seqs_list[i_seq_mask])
+                    else:
+                        parents_per_hpath.append([None])
 
+                # iterate over levels
+                for i_lev in range(target.shape[2]):
+
+                    predictions, hidden, _ = self.decoder(decoder_inp, image_embedding, hidden, i_lev)
+
+                    prediction_size = len(self.classifier_config[i_lev]["tokenizer"])
+
+                    target_lev = target[:, i_seq_mask, i_lev, :prediction_size]
+
+                    mask_index = batch["mask"][:, i_seq_mask].nonzero(as_tuple=True)[0]
+
+                    # ignore images without sequence
+                    valid_target_lev = torch.index_select(target_lev, 0, mask_index)
+                    valid_predictions_lev = torch.index_select(predictions, 0, mask_index)
+
+                    loss += torch.mean(self.loss(valid_predictions_lev, valid_target_lev))
+                    decoder_inp = source[
+                        :, i_seq_mask, i_lev
+                    ]  # TODO decoder_inp comes from true labels in the validatrion, change it to prediction result
+                    source_indexes, target_indexes = self.map_level_prediction(parents_lvl)
+
+                    # counter for meeting each seq several times
+                    flat_counter[target_indexes] += 1
+                    flat_prediction[target_indexes] = (
+                        flat_prediction[target_indexes] + torch.sigmoid(predictions)[source_indexes]
+                    )
+
+                    # Compute normalized version (maxprediction == 1.)
+                    flat_prediction_norm[target_indexes] = flat_prediction_norm[target_indexes] + torch.sigmoid(
+                        predictions
+                    )[source_indexes] / torch.max(torch.sigmoid(predictions))
+
+                    flat_target[target_indexes] = (
+                        flat_target[target_indexes] + target[:, i_seq_mask, i_lev][source_indexes]
+                    )
+
+                    # get parent level
+                    parents_lvl = [x[i_lev] if x[0] is not None else "#PAD" for x in parents_per_hpath]
+
+            # normalizing scores
+            total_loss = loss / (target.shape[2] + target.shape[1])
+            # flat_prediction /= flat_counter
+            # flat_prediction_norm /= flat_counter
+            # flat_target /= flat_counter
         else:
+            hidden = self.decoder.init_hidden_state(image_embedding)
+            # Feed <START> to the model in the first layer 1==<START>
+            decoder_inp = torch.ones([image.shape[0]], dtype=torch.int64).to(image.device.index)
 
             flat_prediction = torch.zeros(image.shape[0], len(self.mapping_config), dtype=image_embedding.dtype).to(
                 image.device.index
@@ -340,10 +388,11 @@ class ConvnetAttnLstm(BaseModel):
             )
             parents_lvl = [None] * image.shape[0]
             for i_lev in range(len(target)):
+
                 predictions, hidden, _ = self.decoder(decoder_inp, image_embedding, hidden, i_lev)
 
                 loss += torch.mean(self.loss(predictions, target[i_lev]))
-                decoder_inp = torch.unsqueeze(source[i_lev], dim=1)
+                decoder_inp = source[i_lev]
 
                 source_indexes, target_indexes = self.map_level_prediction(parents_lvl)
 
@@ -354,14 +403,13 @@ class ConvnetAttnLstm(BaseModel):
                 )
 
                 flat_target[target_indexes] = target[i_lev][source_indexes]
-
-                parents_lvl = parents[i_lev]
-
-            self.f1_test(flat_prediction, flat_target)
-            self.f1_test_norm(flat_prediction_norm, flat_target)
+                parents_lvl = [x[i_lev] for x in parents]
+            total_loss = loss / len(target)
+        self.f1_test(flat_prediction, flat_target)
+        self.f1_test_norm(flat_prediction_norm, flat_target)
 
         return {
-            "loss": loss,
+            "loss": total_loss,
         }
 
     def test_epoch_end(self, outputs):
@@ -435,11 +483,7 @@ class ConvnetAttnLstm(BaseModel):
                 scores_g = scores[g::num_groups]
 
                 # apply diversity penalty
-                lprobs_g = torch.add(
-                    lprobs_g,
-                    other=diversity_buf.unsqueeze(0),
-                    alpha=diversity_strength,
-                )
+                lprobs_g = torch.add(lprobs_g, other=diversity_buf.unsqueeze(0), alpha=diversity_strength,)
 
                 scores_buf, indices_buf, beams_buf = self.simple_beam_search(i_lev, lprobs_g, scores_g)
 

@@ -50,7 +50,6 @@ class IconclassSequenceDecoderPipeline(Pipeline):
 
     def call(self, datasets=None, **kwargs):
         def decode(sample):
-
             classes_vec_max_length = max([len(x["tokenizer"]) for x in self.classifier])
             pad_id = self.classifier[0]["tokenizer"].index("#PAD")
             start_id = self.classifier[0]["tokenizer"].index("#START")
@@ -201,6 +200,7 @@ class IconclassSequenceDecoderPipeline(Pipeline):
                     "source_id_sequence": [start_id] + id_sequence[:-1],
                     "target_vec": torch.tensor(np.asarray(target_vec_list, dtype=np.float32)),
                     "mask": torch.tensor(np.asarray(mask, dtype=np.int8)),
+                    "parents":parents
                 }
 
             if "additional" in sample:

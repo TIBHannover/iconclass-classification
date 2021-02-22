@@ -183,13 +183,22 @@ def pad_collate(batch, pad_values=None):
     elif isinstance(elem, tuple) and hasattr(elem, "_fields"):  # namedtuple
         return elem_type(*(pad_collate(samples) for samples in zip(*batch)))
     elif isinstance(elem, container_abcs.Sequence):
-        # check to make sure that the elements in batch have consistent size
-        it = iter(batch)
-        elem_size = len(next(it))
-        if not all(len(elem) == elem_size for elem in it):
-            raise RuntimeError("each element in list of batch should be of equal size")
-        transposed = zip(*batch)
-        return [pad_collate(samples) for samples in transposed]
+        # TODO find a better way
+        if pad_values is not None:
+            # max_len = 0
+            # for x in batch:
+            #     batch_len = len(x)
+            #     if batch_len > max_len:
+            #         max_len = batch_len
+            return batch
+        else:
+            # check to make sure that the elements in batch have consistent size
+            it = iter(batch)
+            elem_size = len(next(it))
+            if not all(len(elem) == elem_size for elem in it):
+                raise RuntimeError("each element in list of batch should be of equal size")
+            transposed = zip(*batch)
+            return [pad_collate(samples) for samples in transposed]
 
     raise TypeError(default_collate_err_msg_format.format(elem_type))
 

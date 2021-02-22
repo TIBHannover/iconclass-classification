@@ -195,7 +195,7 @@ class ConvnetTransformer(BaseModel):
         self.f1_val(flat_prediction, flat_target)
         self.f1_val_norm(flat_prediction_norm, flat_target)
 
-        return {"loss": loss}
+        return {"loss": loss / len(target)}
 
     def map_level_prediction(self, parents):
         target_indexes = []
@@ -274,9 +274,26 @@ class ConvnetTransformer(BaseModel):
         image_embedding = self.encoder(image)[0]
         pos = self.pos_embedding(image, image_mask)
 
+        print(image_embedding.shape)
+
         image_embedding = self.input_proj(image_embedding)
 
-        self.beam_search(image_embedding)
+        image_mask = F.interpolate(image_mask[None].float(), size=image_embedding.shape[-2:]).to(torch.bool)[0]
+
+        # print(image_mask)
+        # print(image_mask.shape)
+        pos = self.pos_embedding(image, image_mask)
+
+        print(image_embedding.shape)
+        image_embedding = self.input_proj(image_embedding)
+        print(image_embedding.shape)
+
+        # print(pos.shape)
+        decoder_inp = torch.ones([image.shape[0]], dtype=torch.int64).to(image.device.index)
+        predictions = self.decoder(image_embedding, image_mask, decoder_inp, pos)
+        print(predictions)
+
+        print(image_embedding)
 
     @classmethod
     def add_args(cls, parent_parser):

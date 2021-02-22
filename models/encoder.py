@@ -51,7 +51,15 @@ class FrozenBatchNorm2d(torch.nn.Module):
 
 
 class Encoder(nn.Module):
-    def __init__(self, args=None, embedding_dim=None, flatten_embedding=None, returned_layers=None, **kwargs):
+    def __init__(
+        self,
+        args=None,
+        embedding_dim=None,
+        flatten_embedding=None,
+        returned_layers=None,
+        average_pooling=None,
+        **kwargs
+    ):
         super(Encoder, self).__init__()
         if args is not None:
             dict_args = vars(args)
@@ -138,6 +146,10 @@ class Encoder(nn.Module):
         if self.byol_embedding_path is not None:
             self.load_pretrained_byol(self.byol_embedding_path)
 
+        self.average_pooling = average_pooling
+        if self.average_pooling:
+            self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+
     def forward(self, x):
         x = self.body(x)
 
@@ -147,8 +159,12 @@ class Encoder(nn.Module):
         else:
             x = [x[str(i)] for i in range(len(self.layers_returned))]
 
+        if self.average_pooling:
+            x = [self.average_pooling(y) for y in x]
+
         if self.flatten_embedding:
             x = [y.permute(0, 2, 3, 1).reshape(y.size(0), -1, y.size(1)) for y in x]
+
         return x
 
     @classmethod

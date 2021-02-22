@@ -45,7 +45,7 @@ class BaseModel(LightningModule):
         parser.add_argument("--nesterov", type=str2bool, default=False)
         parser.add_argument("--momentum", default=0.9, type=float)
 
-        parser.add_argument("--sched_type", choices=["cosine", "exponetial"])
+        parser.add_argument("--sched_type", choices=["cosine", "exponetial", "step"])
 
         parser.add_argument("--lr_rampup", default=10000, type=int)
         parser.add_argument("--lr_init", default=0.0, type=float)
@@ -127,6 +127,10 @@ class BaseModel(LightningModule):
                 return decayed_learning_rate
 
             lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, exp_lr)
+
+        elif self.sched_type == "step":
+
+            lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, self.step_size)
 
         # optimizer = torch.optim.SGD(
         #     params=list(self.encoder.parameters()) + list(self.decoder.parameters()), lr=1.0, weight_decay=self.params.optimizer.weight_decay,momentum=0.9

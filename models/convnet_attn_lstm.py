@@ -173,13 +173,13 @@ class ConvnetAttnLstm(BaseModel):
         # print(hidden.device)
 
         # Feed <START> to the model in the first layer 1==<START>
-        decoder_inp = torch.ones([image.shape[0]], dtype=torch.int64).to(image.device.index)
         # print('#########################')
         # print(decoder_inp)
         loss = 0
         # Check if batch contains all traces (target [BATCH_SIZE, MAX_SEQUENCE, LEVEL, MAX_CLASSIFIER])
         if "mask" in batch:
             for i_lev in range(target.shape[2]):
+                decoder_inp = source[i_lev]
                 predictions, hidden, _ = self.decoder(decoder_inp, image_embedding, hidden, i_lev)
 
                 prediction_size = len(self.classifier_config[i_lev]["tokenizer"])
@@ -202,10 +202,10 @@ class ConvnetAttnLstm(BaseModel):
             )
             parents_lvl = [None] * image.shape[0]
             for i_lev in range(len(target)):
+                decoder_inp = source[i_lev]
                 predictions, hidden, _ = self.decoder(decoder_inp, image_embedding, hidden, i_lev)
 
                 loss += torch.mean(self.loss(predictions, target[i_lev]))
-                decoder_inp = source[i_lev]
 
                 source_indexes, target_indexes = self.map_level_prediction(parents_lvl)
 

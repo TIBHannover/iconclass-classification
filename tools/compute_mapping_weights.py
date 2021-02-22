@@ -23,7 +23,7 @@ def parse_args():
     parser.add_argument("-v", "--verbose", action="store_true", help="verbose output")
 
     parser.add_argument("--output_path", required=True, help="verbose output")
-    parser.add_argument("--mapping_path", required=True, help="verbose output")
+    parser.add_argument("--input_mapping_path", required=True, help="verbose output")
 
     parser = DatasetsManager.add_args(parser)
 
@@ -43,7 +43,7 @@ def main():
 
     dataset = DatasetsManager().build_dataset(name=args.dataset, args=args)
 
-    mapping_list = read_jsonl(args.mapping_path)
+    mapping_list = read_jsonl(args.input_mapping_path)
     print(mapping_list[100])
     with open(args.output_path, "w") as f:
         label_sum = None

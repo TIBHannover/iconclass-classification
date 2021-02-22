@@ -76,8 +76,10 @@ class IconclassDataloader:
         self.test_path = [dict_args.get("test_path", None)]
         self.test_annotation_path = dict_args.get("test_annotation_path", None)
         self.test_filter_min_dim = dict_args.get("test_filter_min_dim", None)
+        self.test_size = dict_args.get("test_size", None)
 
         self.infer_path = [dict_args.get("infer_path", None)]
+        self.infer_size = [dict_args.get("infer_size", None)]
 
         self.batch_size = dict_args.get("batch_size", None)
         self.num_workers = dict_args.get("num_workers", None)
@@ -177,8 +179,7 @@ class IconclassDataloader:
         transforms = torchvision.transforms.Compose(
             [
                 torchvision.transforms.ToPILImage(),
-                torchvision.transforms.Resize(size=224),
-                torchvision.transforms.CenterCrop(size=224),
+                RandomResize([self.test_size], max_size=self.max_size),
                 torchvision.transforms.ToTensor(),
                 torchvision.transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
             ]
@@ -202,7 +203,11 @@ class IconclassDataloader:
         )
 
         dataloader = torch.utils.data.DataLoader(
-            pipeline(), batch_size=self.batch_size, num_workers=self.num_workers, pin_memory=True
+            pipeline(),
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            pin_memory=True,
+            collate_fn=PadCollate(pad_values={"image": 0.0, "image_mask": False}),
         )
         return dataloader
 
@@ -210,7 +215,7 @@ class IconclassDataloader:
         transforms = torchvision.transforms.Compose(
             [
                 torchvision.transforms.ToPILImage(),
-                torchvision.transforms.Resize(size=256),
+                RandomResize([self.infer_size], max_size=self.max_size),
                 torchvision.transforms.ToTensor(),
                 torchvision.transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
             ]
@@ -222,7 +227,11 @@ class IconclassDataloader:
         pipeline = SequencePipeline([ImagePipeline(self.infer_path), self.infer_image_pipeline()])
 
         dataloader = torch.utils.data.DataLoader(
-            pipeline(), batch_size=self.batch_size, num_workers=self.num_workers, pin_memory=True
+            pipeline(),
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            pin_memory=True,
+            collate_fn=PadCollate(pad_values={"image": 0.0, "image_mask": False}),
         )
         return dataloader
 
@@ -244,11 +253,13 @@ class IconclassDataloader:
         parser.add_argument("--val_path", type=str)
         parser.add_argument("--val_annotation_path", type=str)
         parser.add_argument("--val_filter_min_dim", type=int, default=128, help="delete images with smaller size")
-        parser.add_argument("--val_size", type=int, default=224)
+        parser.add_argument("--val_size", type=int, default=640)
 
         parser.add_argument("--test_path", type=str)
         parser.add_argument("--test_annotation_path", type=str)
         parser.add_argument("--test_filter_min_dim", type=int, default=128, help="delete images with smaller size")
+        parser.add_argument("--test_size", type=int, default=640)
 
         parser.add_argument("--infer_path", type=str)
+        parser.add_argument("--infer_size", type=int, default=640)
         return parser

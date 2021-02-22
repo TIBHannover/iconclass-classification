@@ -15,6 +15,8 @@ from models.models import ModelsManager
 from datasets.utils import read_jsonl
 
 from models.base_model import BaseModel
+from models.encoder import Encoder
+
 
 from pytorch_lightning.core.decorators import auto_move_data
 
@@ -51,18 +53,8 @@ class ConvnetYoloFlatten(BaseModel):
         if self.classifier_path is not None:
             self.classifier_config = read_jsonl(self.classifier_path)
 
-        if self.encoder_model == "resnet152":
-            self.net = resnet152(pretrained=self.pretrained)
-            self.net = nn.Sequential(*list(self.net.children())[:-1])
-            self.dim = 2048
-        elif self.encoder_model == "densenet161":
-            self.net = densenet161(pretrained=self.pretrained)
-            self.net = nn.Sequential(*list(list(self.net.children())[0])[:-1])
-            self.dim = 1920
-        else:
-            self.net = resnet50(pretrained=self.pretrained)
-            self.net = nn.Sequential(*list(self.net.children())[:-1])
-            self.dim = 2048
+        self.encoder = Encoder(args, embedding_dim=None, flatten_embedding=False, average_pooling=True)
+
         self.dropout1 = torch.nn.Dropout(0.5)
         self.fc = torch.nn.Linear(self.dim, 1024)
         self.dropout2 = torch.nn.Dropout(0.5)
@@ -89,7 +81,7 @@ class ConvnetYoloFlatten(BaseModel):
         self.filter_count = dict_args.get("filter_count", None)
 
     def forward(self, x):
-        x = self.net(x)
+        x = self.encoder(x)
         x = torch.flatten(x, 1)
         x = self.dropout1(x)
         x = self.fc(x)
@@ -242,6 +234,7 @@ class ConvnetYoloFlatten(BaseModel):
     def add_args(cls, parent_parser):
         parent_parser = super().add_args(parent_parser)
         parser = argparse.ArgumentParser(parents=[parent_parser], add_help=False, conflict_handler="resolve")
+        parent_parser = Encoder.add_args(parent_parser)
         # args, _ = parser.parse_known_args()
         # if "classifier_path" not in args:
         parser.add_argument("--pretrained", type=bool, default=True)

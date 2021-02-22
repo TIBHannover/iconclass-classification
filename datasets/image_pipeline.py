@@ -126,6 +126,7 @@ class ImageDecodePreprocessingPipeline(Pipeline):
             return {
                 **sample,
                 "image": image,
+                "image_mask": torch.ones(image.shape[1:3], dtype=torch.bool, device=image.device),
             }
 
         return MapDataset(datasets, map_fn=decode)

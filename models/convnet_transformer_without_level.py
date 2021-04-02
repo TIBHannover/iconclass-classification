@@ -42,12 +42,9 @@ class ConvnetTransformer(BaseModel):
         self.mapping_path = dict_args.get("mapping_path", None)
         self.classifier_path = dict_args.get("classifier_path", None)
 
-        self.beam_size = dict_args.get("beam_size", None)
-
         self.use_focal_loss = dict_args.get("use_focal_loss", None)
         self.focal_loss_gamma = dict_args.get("focal_loss_gamma", None)
         self.focal_loss_alpha = dict_args.get("focal_loss_alpha", None)
-        self.filter_label_by_count = dict_args.get("filter_label_by_count", None)
 
         self.mapping_config = []
         if self.mapping_path is not None:
@@ -107,7 +104,6 @@ class ConvnetTransformer(BaseModel):
 
         image_embedding = self.encoder(image)[0]
         # print(image_embedding.shape)
-        # print(image_embedding.shape)
         image_mask = F.interpolate(image_mask[None].float(), size=image_embedding.shape[-2:]).to(torch.bool)[0]
 
         # print(image_mask)
@@ -154,7 +150,6 @@ class ConvnetTransformer(BaseModel):
 
         image_embedding = self.encoder(image)[0]
         # print(image_embedding.shape)
-        # print(image_embedding.shape)
         image_mask = F.interpolate(image_mask[None].float(), size=image_embedding.shape[-2:]).to(torch.bool)[0]
 
         # print(image_mask)
@@ -183,9 +178,9 @@ class ConvnetTransformer(BaseModel):
 
             loss += torch.mean(self.loss(prediction, target[i_lev]))
             decoder_inp = torch.unsqueeze(source[i_lev], dim=1)
+
             source_indexes, target_indexes = self.map_level_prediction(parents_lvl)
 
-            # print(f"{parents_lvl} {target_indexes} {source_indexes}")
             prediction_prob = torch.sigmoid(prediction)
 
             flat_prediction[target_indexes] = prediction_prob[source_indexes]
@@ -194,14 +189,12 @@ class ConvnetTransformer(BaseModel):
 
             flat_target[target_indexes] = target[i_lev][source_indexes]
 
-            parents_lvl = [x[i_lev] if x[0] is not None else "#PAD" for x in parents]
-
-            # parents_lvl = parents[i_lev]
+            parents_lvl = parents[i_lev]
 
         self.f1_val(flat_prediction, flat_target)
         self.f1_val_norm(flat_prediction_norm, flat_target)
 
-        return {"loss": loss / len(target)}
+        return {"loss": loss}
 
     def map_level_prediction(self, parents):
         target_indexes = []
@@ -225,14 +218,6 @@ class ConvnetTransformer(BaseModel):
         return np.swapaxes(source_indexes, 0, 1), np.swapaxes(target_indexes, 0, 1)
 
     def validation_epoch_end(self, outputs):
-        if self.filter_label_by_count is not None and self.filter_label_by_count > 0:
-            mask = torch.zeros(len(self.mapping_config), dtype=torch.bool)
-            for x in self.mapping_config:
-                mask[x["index"]] = True if x["count"] > self.filter_label_by_count else False
-        else:
-            mask = torch.ones(len(self.mapping_config), dtype=torch.float32)
-
-        self.log("val/number_of_labels", torch.sum(mask), prog_bar=True)  # TODO False
 
         loss = 0.0
         count = 0
@@ -243,8 +228,6 @@ class ConvnetTransformer(BaseModel):
         # f1score prediction
         f1_score = self.f1_val.compute().cpu().detach()
         self.log("val/f1", np.nanmean(f1_score), prog_bar=True)
-        f1_score[~mask] = np.nan
-        self.log("val/f1_mask", np.nanmean(f1_score), prog_bar=True)
 
         level_results = {}
         for i, x in enumerate(self.mapping_config):
@@ -257,8 +240,6 @@ class ConvnetTransformer(BaseModel):
         # f1score each layer normalized prediction
         f1_norm_score = self.f1_val_norm.compute().cpu().detach()
         self.log("val/f1_norm", np.nanmean(f1_norm_score), prog_bar=True)
-        f1_norm_score[~mask] = np.nan
-        self.log("val/f1_norm_mask", np.nanmean(f1_norm_score), prog_bar=True)
 
         level_results = {}
         for i, x in enumerate(self.mapping_config):
@@ -270,134 +251,14 @@ class ConvnetTransformer(BaseModel):
 
         self.log("val/loss", loss / count, prog_bar=True)
 
-    def greedy_decode(self, image_embedding, position_embedding, mask, max_length=120):
-
-        # image_embedding = torch.cat(image_embedding, dim=1)
-        # print(image_embedding.shape)
-        # print('*********')
-        # print(image_embedding.shape)
-        # return loss
-
-        device = image_embedding.device
-
-        batch_size = image_embedding.shape[0]
-
-        bs, c, h, w = image_embedding.shape
-        image_embedding = image_embedding.flatten(2).permute(2, 0, 1)
-        pos_embedding = position_embedding.flatten(2).permute(2, 0, 1)
-        mask = mask.flatten(1)
-        image_embedding = image_embedding + pos_embedding
-
-        level = 0
-
-        start_embedding = self.decoder.embeddings[level](torch.tensor([1] * batch_size).to(device)).unsqueeze(0)
-        start_tgt_mask = self.decoder.transformer.generate_square_subsequent_mask(start_embedding.shape[0]).to(device)
-
-        query_embedding = start_embedding
-        tgt_mask = start_tgt_mask
-        for level in range(8):
-            print(image_embedding.shape)
-            print(query_embedding.shape)
-            print(tgt_mask.shape)
-            print(mask.shape)
-            decoder_output = self.decoder.transformer(
-                src=image_embedding, src_key_padding_mask=~mask, tgt=query_embedding, tgt_mask=tgt_mask,
-            )
-            decoder_output = decoder_output.permute(1, 0, 2)
-            prob = self.decoder.classifiers[level](decoder_output[:, level, :])
-            print(decoder_output.shape)
-            print(prob.shape)
-            print(prob)
-            top_prediction = torch.topk(prob, 3, 1)
-
-            top_prediction_index = top_prediction[1]
-
-            print(top_prediction_index)
-            print(top_prediction_index.shape)
-            exit()
-        # print("SHAPE 1")
-        # print(image_embedding.shape)
-        # print(query_embedding.shape)
-        # print(pos_embedding.shape)
-        # print(mask.shape)
-
-        # print("SHAPE 2")
-        # print(image_embedding.shape)
-        # print(pos_embedding.shape)
-        # print(mask.shape)
-
-        # , pos_embedding
-        # TODO detr only apply this on q and k
-        # image_mask has to be inverted (zero -> content)
-        decoder_output = self.transformer(
-            src=image_embedding, src_key_padding_mask=~mask, tgt=query_embedding, tgt_mask=tgt_mask,
-        )
-        # print(decoder_output.shape)
-        decoder_output = decoder_output.permute(1, 0, 2)
-
-        # print(decoder_output.shape)
-        classfier_results = []
-        for level in range(len(query)):
-            x = self.classifiers[level](decoder_output[:, level, :])
-            # print(x.shape)
-            classfier_results.append(x)
-        return classfier_results
-
-        hiddens = [x.to(image_embedding[0].device.index) for x in hiddens]
-        # print(hidden.device)
-
-        # Feed <START> to the model in the first layer 1==<START>
-        # decoder_inp = torch.ones([image.shape[0]], dtype=torch.int64).to(image.device.index)
-        # print('#########################')
-        # print(decoder_inp)
-        predictions_list = []
-        pred_seq = torch.tensor([[self.vocabulary.start_id()] * image_embedding[0].shape[0]])
-        print(pred_seq.shape)
-        for i in range(max_length):
-            prediction, hiddens, _ = self.decoder(pred_seq[:, 0], image_embedding, hiddens)
-            predictions_list.append(prediction)
-
-        prediction = torch.stack(predictions_list, dim=1)
-
-        prediction_flat = prediction.reshape([-1, prediction.shape[-1]])
-        log_pred = F.log_softmax(prediction_flat, dim=1)
-        predict_token = torch.argmax(log_pred, dim=1)
-        target_flat = target.reshape([-1])
-        loss = self.loss(log_pred, target_flat)
-
-        loss = loss * target_mask.reshape([-1])
-
-        loss = torch.mean(loss * target_mask.reshape([-1]))
-        accuracy = ((predict_token == target_flat) * target_mask.reshape([-1])).float().sum() / target_mask.sum()
-
     def test_step(self, batch, batch_idx):
-
-        print(batch.keys())
-        # print(batch["parents"])
-        target = batch["id_sequence"]
-        print(target)
-        target_mask = batch["mask"]
-        print(target_mask)
-        print(target_mask.shape)
-        image = batch["image"]
-        image_mask = batch["image_mask"]
-
-        image_embedding = self.encoder(image)[0]
-
-        image_embedding = self.input_proj(image_embedding)
-        image_mask = F.interpolate(image_mask[None].float(), size=image_embedding.shape[-2:]).to(torch.bool)[0]
-        pos = self.pos_embedding(image, image_mask)
-        # image = F.interpolate(image, size = (299,299), mode= 'bicubic', align_corners=False)
-        # print(image.shape)
-        # forward image
-
-        if self.beam_size <= 1:
-            self.greedy_decode(image_embedding, pos, image_mask)
+        pass
 
     @auto_move_data
     def infer_step(self, batch, k=10):
         image = batch["image"]
         image_mask = batch["image_mask"]
+        print(image.shape)
         image_embedding = self.encoder(image)[0]
         pos = self.pos_embedding(image, image_mask)
 
@@ -408,7 +269,12 @@ class ConvnetTransformer(BaseModel):
         image_mask = F.interpolate(image_mask[None].float(), size=image_embedding.shape[-2:]).to(torch.bool)[0]
 
         # print(image_mask)
-        # print(image_mask.shape)´
+        # print(image_mask.shape)
+        pos = self.pos_embedding(image, image_mask)
+
+        print(image_embedding.shape)
+        image_embedding = self.input_proj(image_embedding)
+        print(image_embedding.shape)
 
         # print(pos.shape)
         decoder_inp = torch.ones([image.shape[0]], dtype=torch.int64).to(image.device.index)
@@ -426,13 +292,9 @@ class ConvnetTransformer(BaseModel):
         # if "classifier_path" not in args:
         parser.add_argument("--mapping_path", type=str)
 
-        parser.add_argument("--beam_size", type=int, default=1)
-
         parser.add_argument("--use_focal_loss", action="store_true")
         parser.add_argument("--focal_loss_gamma", type=float, default=2)
         parser.add_argument("--focal_loss_alpha", type=float, default=0.25)
-
-        parser.add_argument("--filter_label_by_count", type=int, default=0)
 
         return parser
 

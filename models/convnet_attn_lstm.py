@@ -27,6 +27,7 @@ from sklearn.metrics import fbeta_score
 
 import pandas as pd
 
+
 @ModelsManager.export("convnet_attn_lstm")
 class ConvnetAttnLstm(BaseModel):
     def __init__(self, args=None, **kwargs):
@@ -44,20 +45,20 @@ class ConvnetAttnLstm(BaseModel):
         self.classifier_path = dict_args.get("classifier_path", None)
         self.label_mapping_path = dict_args.get("label_mapping_path", None)
         self.outpath_f2_per_lbs = dict_args.get("outpath_f2_per_lbs", None)
-        
+
         self.use_diverse_beam_search = dict_args.get("use_diverse_beam_search", None)
         self.div_beam_s_group = dict_args.get("div_beam_s_group", None)
-        
+
         self.use_label_smoothing = dict_args.get("use_label_smoothing", None)
-        self.LABEL_SMOOTHING_factor =0.008 #TODO
+        self.LABEL_SMOOTHING_factor = 0.008  # TODO
         self.using_weights = dict_args.get("using_weights", None)
         self.use_focal_loss = dict_args.get("use_focal_loss", None)
         self.focal_loss_gamma = dict_args.get("focal_loss_gamma", None)
         self.focal_loss_alpha = dict_args.get("focal_loss_alpha", None)
         self.filter_label_by_count = dict_args.get("filter_label_by_count", None)
-        
+
         self.best_threshold = dict_args.get("best_threshold", None)
-        
+
         self.mapping_config = []
         if self.mapping_path is not None:
             self.mapping_config = read_jsonl(self.mapping_path)
@@ -80,11 +81,11 @@ class ConvnetAttnLstm(BaseModel):
 
         if self.label_mapping_path is not None:
             self.label_mapping = read_jsonl_lb_mapping(self.label_mapping_path)
-        
+
         # if self.use_weights is not None:
         #     self.weights = [x['weight'] for x in self.mapping_config]
         #     self.weights = np.array(self.weights)
-            
+
         self.max_level = len(self.classifier_config)
 
         self.vocabulary_size = [len(x["tokenizer"]) for x in self.classifier_config]  # get from tockenizer
@@ -96,13 +97,13 @@ class ConvnetAttnLstm(BaseModel):
         self.decoder = Decoder(
             self.vocabulary_size, self.embedding_dim, self.attention_dim, self.embedding_dim, self.max_vocab_size
         )
-        
+
         if self.using_weights:
             logging.info("Using weighting for loss")
 
             # for x in self.mapping_config:
-                # self.weights[0, x["class_id"]] = x["weight"]
-            self.weights = [x['weight_pos'] for x in self.mapping_config]
+            # self.weights[0, x["class_id"]] = x["weight"]
+            self.weights = [x["weight_pos"] for x in self.mapping_config]
             self.weights = torch.Tensor(self.weights)
         else:
             self.weights = torch.ones(len(self.mapping_config))
@@ -143,10 +144,12 @@ class ConvnetAttnLstm(BaseModel):
         loss = 0
         # predictions_list = []
         parents_lvl = [None] * image.shape[0]
-        flat_prediction = torch.zeros(image.shape[0], len(self.mapping_config),
-                                      dtype=image_embedding.dtype).to(image.device.index)
-        flat_target = torch.zeros(image.shape[0], len(self.mapping_config), 
-                                  dtype=target[0].dtype).to(image.device.index)
+        flat_prediction = torch.zeros(image.shape[0], len(self.mapping_config), dtype=image_embedding.dtype).to(
+            image.device.index
+        )
+        flat_target = torch.zeros(image.shape[0], len(self.mapping_config), dtype=target[0].dtype).to(
+            image.device.index
+        )
         for i_lev in range(len(target)):
             predictions, hidden, _ = self.decoder(decoder_inp, image_embedding, hidden, i_lev)
             # print(f"Pre: {torch.min(predictions)} {torch.max(predictions)} {torch.mean(predictions)}")
@@ -154,16 +157,16 @@ class ConvnetAttnLstm(BaseModel):
             #     f"Post: {torch.min(torch.sigmoid(predictions))} {torch.max(torch.sigmoid(predictions))} {torch.mean(torch.sigmoid(predictions))}"
             # )
             # predictions_list.append(torch.sigmoid(predictions))
-            
+
             source_indexes, target_indexes = self.map_level_prediction(parents_lvl)
             parents_lvl = [x[i_lev] for x in parents]
             flat_prediction[target_indexes] = torch.sigmoid(predictions)[source_indexes]
             flat_target[target_indexes] = target[i_lev][source_indexes]
-            
+
             # loss += torch.mean(self.loss(predictions, target[i_lev]))
             decoder_inp = source[i_lev]
             # decoder_inp = torch.tensor(target[i_lev]).to(torch.int64).to(image.device.index)
-        
+
         if self.use_label_smoothing:
             targets_smooth = flat_target.float() * (1 - self.LABEL_SMOOTHING_factor) + 0.5 * self.LABEL_SMOOTHING_factor
         else:
@@ -172,7 +175,7 @@ class ConvnetAttnLstm(BaseModel):
         # total_loss = loss / len(target)
 
         # loss = total_loss
-        return {"loss":lloss}
+        return {"loss": lloss}
 
     def training_step_end(self, outputs):
         self.log("train/loss", outputs["loss"].mean(), prog_bar=True)
@@ -250,8 +253,6 @@ class ConvnetAttnLstm(BaseModel):
 
             # total_loss = loss / len(target)
 
-
-            
             total_loss = torch.mean(self.loss(flat_prediction, flat_target))
 
             tt = flat_target.detach().cpu().numpy()
@@ -391,7 +392,7 @@ class ConvnetAttnLstm(BaseModel):
         # hidden = self.decoder.reset_state(image.shape[0]).to(image.device.index)
         # print(hidden.device)
         hidden = self.decoder.init_hidden_state(image_embedding)
-        
+
         # Feed <START> to the model in the first layer 1==<START>
         decoder_inp = torch.ones([image.shape[0]], dtype=torch.int64).to(image.device.index)
 
@@ -473,13 +474,13 @@ class ConvnetAttnLstm(BaseModel):
             return np.zeros([2, 0]), np.zeros([2, 0])
 
         return np.swapaxes(source_indexes, 0, 1), np.swapaxes(target_indexes, 0, 1)
-        
 
     def on_test_epoch_start(self):
         self.all_predictions = []
         self.all_targets = []
         self.all_losses = []
         self.f_values = pd.DataFrame()
+
     def test_epoch_end(self, outputs):
 
         if self.filter_label_by_count is not None and self.filter_label_by_count > 0:
@@ -558,19 +559,15 @@ class ConvnetAttnLstm(BaseModel):
         metrics = {}
         arg_sorted = self.all_predictions.argsort(axis=1)
         for threshold in self.best_threshold:
-            sc= get_score(
-                binarize_prediction(self.all_predictions, threshold, arg_sorted), self.all_targets
-            )
+            sc = get_score(binarize_prediction(self.all_predictions, threshold, arg_sorted), self.all_targets)
             metrics[f"test_f2_th_{threshold:.2f}"] = sc
             self.f_values[f"test_f2_th_{threshold:.2f}"] = sc
 
-           
         metrics["test_loss"] = np.mean(self.all_losses)
-        self.f_values['num_lbs'] = np.sum(self.all_targets, axis = 0)
-        
-        print('saving the F-scores for each label')
-        self.f_values.to_csv(self.outpath_f2_per_lbs)
+        self.f_values["num_lbs"] = np.sum(self.all_targets, axis=0)
 
+        print("saving the F-scores for each label")
+        self.f_values.to_csv(self.outpath_f2_per_lbs)
 
     @auto_move_data
     def infer_step(self, batch, k=10):
@@ -822,7 +819,7 @@ class ConvnetAttnLstm(BaseModel):
 
         parser.add_argument("--use_diverse_beam_search", action="store_true", default=False)
         parser.add_argument("--div_beam_s_group", type=int, default=2)
-        
+
         parser.add_argument("--use_label_smoothing", action="store_true", default=False)
         parser.add_argument("--using_weights", action="store_true", default=False)
         parser.add_argument("--use_focal_loss", action="store_true", default=False)
@@ -830,8 +827,8 @@ class ConvnetAttnLstm(BaseModel):
         parser.add_argument("--focal_loss_alpha", type=float, default=0.25)
 
         parser.add_argument("--filter_label_by_count", type=int, default=0)
-        
-        parser.add_argument("--best_threshold", nargs="+",type=float, default=[0.2])
+
+        parser.add_argument("--best_threshold", nargs="+", type=float, default=[0.2])
         return parser
 
 

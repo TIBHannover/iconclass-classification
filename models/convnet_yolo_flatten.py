@@ -40,6 +40,7 @@ class ConvnetYoloFlatten(BaseModel):
         self.classifier_path = dict_args.get("classifier_path", None)
 
         self.using_weights = dict_args.get("using_weights", False)
+        self.filter_label_by_count = dict_args.get("filter_label_by_count", None)
 
         self.mapping_config = []
         if self.mapping_path is not None:
@@ -56,7 +57,7 @@ class ConvnetYoloFlatten(BaseModel):
         self.encoder = Encoder(args, embedding_dim=None, flatten_embedding=False, average_pooling=True)
 
         self.dropout1 = torch.nn.Dropout(0.5)
-        self.fc = torch.nn.Linear(self.dim, 1024)
+        self.fc = torch.nn.Linear(self.encoder.dim[0], 1024)
         self.dropout2 = torch.nn.Dropout(0.5)
         self.classifier = torch.nn.Linear(1024, len(self.mapping_config))
 
@@ -81,7 +82,7 @@ class ConvnetYoloFlatten(BaseModel):
         self.filter_count = dict_args.get("filter_count", None)
 
     def forward(self, x):
-        x = self.encoder(x)
+        x = self.encoder(x)[0]
         x = torch.flatten(x, 1)
         x = self.dropout1(x)
         x = self.fc(x)
@@ -127,6 +128,14 @@ class ConvnetYoloFlatten(BaseModel):
         return {"loss": loss}
 
     def validation_epoch_end(self, outputs):
+        if self.filter_label_by_count is not None and self.filter_label_by_count > 0:
+            mask = torch.zeros(len(self.mapping_config), dtype=torch.bool)
+            for x in self.mapping_config:
+                mask[x["index"]] = True if x["count"] > self.filter_label_by_count else False
+        else:
+            mask = torch.ones(len(self.mapping_config), dtype=torch.float32)
+
+        self.log("val/number_of_labels", torch.sum(mask), prog_bar=True)  # TODO False
 
         loss = 0.0
         count = 0
@@ -147,6 +156,9 @@ class ConvnetYoloFlatten(BaseModel):
             level_results[x["depth"]].append(f1_score[x["range"][0] : x["range"][1]])
         for depth, x in sorted(level_results.items(), key=lambda x: x[0]):
             self.log(f"val/f1_{depth}", np.nanmean(torch.cat(x, dim=0)), prog_bar=True)
+
+        f1_score[~mask] = np.nan
+        self.log("val/f1_mask", np.nanmean(f1_score), prog_bar=True)
 
     def test_step(self, batch, batch_idx):
         image = batch["image"]
@@ -233,20 +245,17 @@ class ConvnetYoloFlatten(BaseModel):
     @classmethod
     def add_args(cls, parent_parser):
         parent_parser = super().add_args(parent_parser)
-        parser = argparse.ArgumentParser(parents=[parent_parser], add_help=False, conflict_handler="resolve")
         parent_parser = Encoder.add_args(parent_parser)
+        parser = argparse.ArgumentParser(parents=[parent_parser], add_help=False, conflict_handler="resolve")
         # args, _ = parser.parse_known_args()
         # if "classifier_path" not in args:
-        parser.add_argument("--pretrained", type=bool, default=True)
-        parser.add_argument(
-            "--encoder_model", choices=("resnet152", "densenet161", "resnet50", "inceptionv3"), default="resnet50"
-        )
         parser.add_argument("--mapping_path", type=str)
         parser.add_argument("--classifier_path", type=str)
         parser.add_argument("--byol_embedding_path", type=str)
 
         parser.add_argument("--using_weights", type=bool, default=False)
         parser.add_argument("--filter_count", type=int, default=-1)
+        parser.add_argument("--filter_label_by_count", type=int, default=0)
         return parser
 
     def load_pretrained_byol(self, path_checkpoint):

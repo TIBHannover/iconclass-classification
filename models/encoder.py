@@ -160,7 +160,7 @@ class Encoder(nn.Module):
             x = [x[str(i)] for i in range(len(self.layers_returned))]
 
         if self.average_pooling:
-            x = [self.average_pooling(y) for y in x]
+            x = [self.avgpool(y) for y in x]
 
         if self.flatten_embedding:
             x = [y.permute(0, 2, 3, 1).reshape(y.size(0), -1, y.size(1)) for y in x]

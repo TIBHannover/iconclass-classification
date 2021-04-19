@@ -14,7 +14,7 @@ from models.models import ModelsManager
 from models.resnet import ResNet50
 
 from models.base_model import BaseModel
-from datasets.utils import read_jsonl
+from datasets.utils import read_jsonl, read_jsonl_lb_mapping
 
 from models.loss import FocalBCEWithLogitsLoss
 
@@ -38,7 +38,11 @@ class ConvnetAttnLstm(BaseModel):
 
         self.mapping_path = dict_args.get("mapping_path", None)
         self.classifier_path = dict_args.get("classifier_path", None)
-
+        self.label_mapping_path = dict_args.get("label_mapping_path", None)
+        
+        self.use_diverse_beam_search = dict_args.get("use_diverse_beam_search", None)
+        self.div_beam_s_group =dict_args.get("div_beam_s_group", None)
+        
         self.use_focal_loss = dict_args.get("use_focal_loss", None)
         self.focal_loss_gamma = dict_args.get("focal_loss_gamma", None)
         self.focal_loss_alpha = dict_args.get("focal_loss_alpha", None)
@@ -63,7 +67,10 @@ class ConvnetAttnLstm(BaseModel):
         self.classifier_config = {}
         if self.classifier_path is not None:
             self.classifier_config = read_jsonl(self.classifier_path)
-
+        
+        if self.label_mapping_path is not None:
+            self.label_mapping = read_jsonl_lb_mapping(self.label_mapping_path)
+        
         self.max_level = len(self.classifier_config)
 
         self.vocabulary_size = [len(x["tokenizer"]) for x in self.classifier_config]  # get from tockenizer
@@ -82,18 +89,14 @@ class ConvnetAttnLstm(BaseModel):
             )
         else:
             self.loss = torch.nn.BCEWithLogitsLoss(reduction="none")
+        
+        
+        
+        self.all_predictions = []
+        self.all_targets = []
+        self.all_losses = []
 
-        self.f1_val = pl.metrics.classification.F1(num_classes=len(self.mapping_config), multilabel=True, average=None)
 
-        self.f1_val_norm = pl.metrics.classification.F1(
-            num_classes=len(self.mapping_config), multilabel=True, average=None
-        )
-
-        self.f1_test = pl.metrics.classification.F1(num_classes=len(self.mapping_config), multilabel=True, average=None)
-
-        self.f1_test_norm = pl.metrics.classification.F1(
-            num_classes=len(self.mapping_config), multilabel=True, average=None
-        )
 
     def forward(self, x):
         return x
@@ -138,10 +141,10 @@ class ConvnetAttnLstm(BaseModel):
 
     def training_step_end(self, outputs):
         self.log("train/loss", outputs["loss"].mean(), prog_bar=True)
-        if (self.global_step % self.trainer.log_every_n_steps) == 0:
-            for i, (pred, target) in enumerate(zip(outputs["predictions"], outputs["targets"])):
-                self.logger.experiment.add_histogram(f"train/predict_{i}", pred, self.global_step)
-                self.logger.experiment.add_histogram(f"train/target_{i}", target, self.global_step)
+        # if (self.global_step % self.trainer.log_every_n_steps) == 0:
+        #     for i, (pred, target) in enumerate(zip(outputs["predictions"], outputs["targets"])):
+        #         self.logger.experiment.add_histogram(f"train/predict_{i}", pred, self.global_step)
+        #         self.logger.experiment.add_histogram(f"train/target_{i}", target, self.global_step)
 
         return {"loss": outputs["loss"].mean()}
 
@@ -162,8 +165,8 @@ class ConvnetAttnLstm(BaseModel):
         hidden = self.decoder.init_hidden_state(image_embedding)
 
         # Feed <START> to the model in the first layer 1==<START>
-        # print('#########################')
-        # print(decoder_inp)
+        decoder_inp = torch.ones([image.shape[0]], dtype=torch.int64).to(image.device.index)
+
         loss = 0
         # Check if batch contains all traces (target [BATCH_SIZE, MAX_SEQUENCE, LEVEL, MAX_CLASSIFIER])
         if "mask" in batch:
@@ -205,11 +208,19 @@ class ConvnetAttnLstm(BaseModel):
 
                 flat_target[target_indexes] = target[i_lev][source_indexes]
 
-                parents_lvl = parents[i_lev]
-            total_loss = loss / len(target)
-            self.f1_val(flat_prediction, flat_target)
-            self.f1_val_norm(flat_prediction_norm, flat_target)
+                # parents_lvl = parents[i_lev]
+                parents_lvl = [x[i_lev] for x in parents]
 
+            total_loss = loss/len(target)
+
+            tt = flat_target.detach().cpu().numpy()
+            pp =flat_prediction.detach().cpu().numpy()
+            ll = total_loss.detach().cpu().numpy()
+
+            self.all_targets.append(tt)
+            self.all_predictions.append(pp)
+            self.all_losses.append(ll)
+            
         return {
             "loss": total_loss,
         }
@@ -230,11 +241,14 @@ class ConvnetAttnLstm(BaseModel):
         target_indexes = np.asarray(target_indexes)
         if len(source_indexes.shape) < 2:
             return np.zeros([2, 0]), np.zeros([2, 0])
-        # print(source_indexes.shape)
-        # print(target_indexes.shape)
-        # print(self.mapping_lut[None])
+
         return np.swapaxes(source_indexes, 0, 1), np.swapaxes(target_indexes, 0, 1)
 
+    
+    def on_validation_epoch_start(self):
+        self.all_predictions = []
+        self.all_targets = []
+        self.all_losses = []
     def validation_epoch_end(self, outputs):
 
         if self.filter_label_by_count is not None and self.filter_label_by_count > 0:
@@ -242,7 +256,7 @@ class ConvnetAttnLstm(BaseModel):
             for x in self.mapping_config:
                 mask[x["index"]] = True if x["count"] > self.filter_label_by_count else False
         else:
-            mask = torch.ones(len(self.mapping_config), dtype=torch.float32)
+            mask = torch.ones(len(self.mapping_config), dtype=torch.bool)
 
         self.log("val/number_of_labels", torch.sum(mask), prog_bar=True)  # TODO False
 
@@ -281,13 +295,62 @@ class ConvnetAttnLstm(BaseModel):
             self.log(f"val/f1_norm_{depth}", np.nanmean(torch.stack(x, dim=0)), prog_bar=False)
 
         self.log("val/loss", loss / count, prog_bar=True)
+        
+        
+        def binarize_prediction(probabilities, threshold: float, argsorted=None,
+                        min_labels=1, max_labels=10):
+            """ Return matrix of 0/1 predictions, same shape as probabilities.
+            """
+            # assert probabilities.shape[1] == self.num_classes
+            if argsorted is None:
+                argsorted = probabilities.argsort(axis=1)
+            
+            max_mask = _make_mask(argsorted, max_labels)
+            min_mask = _make_mask(argsorted, min_labels)
+            prob_mask = probabilities > threshold
+            return (max_mask & prob_mask) | min_mask
+        
+        
+        def _make_mask(argsrtd, top_n: int):
+            mask = np.zeros_like(argsrtd, dtype=np.uint8)
+            col_indices = argsrtd[:, -top_n:].reshape(-1)
+            row_indices = [i // top_n for i in range(len(col_indices))]
+            mask[row_indices, col_indices] = 1
+            return mask
+        
+        def get_score(y_pred, all_targets):
+            return fbeta_score(
+                    all_targets, y_pred, beta=2, average='samples')
+        
+        
+        
+        self.all_predictions = np.concatenate(self.all_predictions, axis=0)
+        self.all_targets = np.concatenate(self.all_targets, axis=0)
+        self.all_losses = np.stack(self.all_losses)
 
+        
+        nonfiltered_lbs = np.where(~mask.numpy())
+        self.all_predictions = np.delete(self.all_predictions, nonfiltered_lbs, axis =1)
+        self.all_targets = np.delete(self.all_targets, nonfiltered_lbs, axis =1)
+        metrics = {}
+        arg_sorted = self.all_predictions.argsort(axis=1)
+        for threshold in [0.05,0.07,0.09, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4]:
+            metrics[f'valid_f2_th_{threshold:.2f}'] = get_score(
+                binarize_prediction(self.all_predictions, threshold, arg_sorted), self.all_targets)
+        metrics['valid_loss'] = np.mean(self.all_losses)
+        # print(' | '.join(f'{k} {v:.3f}' for k, v in sorted(
+        #     metrics.items(), key=lambda kv: -kv[1])))
+        for kk, vv in sorted(metrics.items(), key=lambda kv: -kv[1]):
+            self.log(kk, np.nanmean(round(vv, 3)), prog_bar=True)
+        
+        
+        
     def test_step(self, batch, batch_idx):
         image = batch["image"]
         source = batch["source_id_sequence"]
         target = batch["target_vec"]
         parents = batch["parents"]
-        # TODO add threshold for each label and scale factor for levels prediction
+        #TODO add threshold for each label and scale factor for levels prediction
         # forward image
         image_embedding = self.encoder(image)
         image_embedding = torch.cat(image_embedding, dim=1)
@@ -300,21 +363,21 @@ class ConvnetAttnLstm(BaseModel):
         loss = 0
         # Check if batch contains all traces (target [BATCH_SIZE, MAX_SEQUENCE, LEVEL, MAX_CLASSIFIER])
         if "mask" in batch:
-
-            flat_prediction = torch.zeros(image.shape[0], len(self.mapping_config), dtype=image_embedding.dtype).to(
-                image.device.index
-            )
-            flat_prediction_norm = torch.zeros(
-                image.shape[0], len(self.mapping_config), dtype=image_embedding.dtype
-            ).to(image.device.index)
-            flat_target = torch.zeros(image.shape[0], len(self.mapping_config), dtype=target[0].dtype).to(
-                image.device.index
-            )
-            flat_counter = torch.zeros(image.shape[0], len(self.mapping_config), dtype=target[0].dtype).to(
-                image.device.index
-            )
-
-            # iterate over pathes in the hierarchy for each image
+            
+            flat_prediction = torch.zeros(image.shape[0], 
+                            len(self.mapping_config),
+                            dtype=image_embedding.dtype).to(image.device.index)
+            flat_prediction_norm = torch.zeros(image.shape[0], 
+                            len(self.mapping_config), 
+                            dtype=image_embedding.dtype).to(image.device.index)
+            flat_target = torch.zeros(image.shape[0],
+                        len(self.mapping_config), 
+                        dtype=target[0].dtype).to(image.device.index)
+            flat_counter = torch.zeros(image.shape[0],
+                        len(self.mapping_config), 
+                        dtype=target[0].dtype).to(image.device.index)
+           
+            #iterate over pathes in the hierarchy for each image
             for i_seq_mask in range(target.shape[1]):
                 hidden = self.decoder.init_hidden_state(image_embedding)
                 # Feed <START> to the model in the first layer 1==<START>
@@ -448,13 +511,39 @@ class ConvnetAttnLstm(BaseModel):
 
     @auto_move_data
     def infer_step(self, batch, k=10):
+        # lll = dict((str(l), 0) for l in range(0,11))
+        # if self.filter_label_by_count is not None and self.filter_label_by_count > 0:
+        #     mask = torch.zeros(len(self.mapping_config), dtype=torch.bool)
+        #     for x in self.mapping_config:
+        #         mask[x["index"]] = True if x["count"] > self.filter_label_by_count else False
+        #         if x["count"] > self.filter_label_by_count and x['level_id'] in lll:
+        #             # print(x['level_id'])
+        #             lll[x['level_id']] += 1
         image = batch["image"]
         image_embedding = self.encoder(image)
-        self.diverse_beam_search(image_embedding, num_groups=10, diversity_strength=-0.2, beam_size=10)
-        self.old_beam_search(image_embedding)
-
+        image_embedding = image_embedding[0]
+        
+        seqs = self.old_beam_search(image_embedding)
+        if self.use_diverse_beam_search:
+            seqs += self.diverse_beam_search(image_embedding, num_groups=self.div_beam_s_group, diversity_strength=-0.2, beam_size=10)
+        
+        seqs = list(dict.fromkeys(seqs))
+        lb_seqs =[]
+        for i in seqs:
+            if i in self.label_mapping:
+                lb_seqs.append({'id':i, 'txt':self.label_mapping[i]})
+        
+        return lb_seqs
+        
+        
     def diverse_beam_search(self, image_embedding, num_groups=5, diversity_strength=-0.2, beam_size=10):
-
+        
+        seqs = torch.ones([beam_size, 1], dtype=torch.int64).to(image_embedding.device.index)  # (k, 1)
+        # Lists to store completed sequences and scores
+        complete_seqs = list()
+        complete_seqs_scores = list()
+        
+        
         encoder_dim = image_embedding.size(2)
         # Flatten encoding
         num_pixels = image_embedding.size(1)
@@ -466,7 +555,9 @@ class ConvnetAttnLstm(BaseModel):
         final_scores = torch.zeros(beam_size, 1).to(image_embedding.device.index)
         final_beams = torch.ones([beam_size, 1], dtype=torch.int64).to(image_embedding.device.index)
         final_indices = []
+        
         for i_lev in range(len(self.classifier_config)):
+            lev_dictionary = self.classifier_config[i_lev]["tokenizer"]
             predictions, hidden, _ = self.decoder(decoder_inp, image_embedding, hidden, i_lev)
 
             predictions_prob = torch.sigmoid(predictions)
@@ -495,15 +586,44 @@ class ConvnetAttnLstm(BaseModel):
 
                 # update diversity penalty
                 diversity_buf.scatter_add_(0, indices_buf, torch.ones(indices_buf.size()).to(diversity_buf))
-            prev_word_inds = torch.stack(beams_G, dim=0).view(beam_size, -1)
+            prev_word_inds = torch.stack(beams_G, dim=0).view(beam_size, -1).squeeze(1)
             # print(prev_word_inds)
             final_scores = torch.stack(scores_G, dim=0).view(beam_size, -1)
-            next_word_inds = torch.stack(indices_G, dim=0).view(beam_size, -1)
+            next_word_inds = torch.stack(indices_G, dim=0).view(beam_size, -1).squeeze(1)
             # print(next_word_inds)
-            final_beams = torch.cat([final_beams[prev_word_inds].squeeze(1), next_word_inds], dim=-1)
-        print(final_beams)
+            final_beams = torch.cat([final_beams[prev_word_inds], next_word_inds.unsqueeze(1)], dim=-1)
+            
+            # Add new words to sequences
+            seqs = torch.cat([seqs[prev_word_inds], next_word_inds.unsqueeze(1)], dim=1)  # (s, step+1) #TODO skip the complete sequences
+            # print(seqs)
+            # Which sequences are incomplete (didn't reach <end>)?
+            # incomplete_inds = [
+            #     ind for ind, next_word in enumerate(next_word_inds) if next_word != lev_dictionary.index("#PAD")
+            # ]
+            # complete_inds = list(set(range(len(next_word_inds))) - set(incomplete_inds))
+
+            # Set aside complete sequences
+            # if len(complete_inds) > 0:
+            #     complete_seqs.extend(seqs[complete_inds].tolist())
+            #     complete_seqs_scores.extend(final_scores[complete_inds])
+            # beam_size -= len(complete_inds)  # reduce beam length accordingly
+
+            # Proceed with incomplete sequences
+            # if beam_size == 0:
+            #     break
+            # seqs = seqs[incomplete_inds]
+            hidden = hidden[prev_word_inds]
+            image_embedding = image_embedding[prev_word_inds]
+            decoder_inp = next_word_inds.unsqueeze(1)
+            
+            
+            
+            
         final_beams = list(map(lambda l: l[1:], final_beams))
-        print(self.seq2str(final_beams))
+        seqs = self.seq2str(final_beams)
+        seqs = sorted(seqs, key = len)
+        return [j for i, j in enumerate(seqs) if all(j not in k for k in seqs[i + 1:])]
+        
 
     def simple_beam_search(self, step, lprobs, scores):
         beam_size, vocab_size = lprobs.size()
@@ -554,19 +674,10 @@ class ConvnetAttnLstm(BaseModel):
             predictions, hidden, _ = self.decoder(decoder_inp, image_embedding, hidden, i_lev)
 
             predictions_prob = torch.sigmoid(predictions)
-            # print(predictions_prob.shape)
 
-            # print(predictions_prob)
-            # print('*************')
-            # print('*************')
-
-            # print('*************')
-            # print('*************')
             predictions_prob = (
                 top_k_scores.expand_as(predictions_prob) + predictions_prob
-            )  # /predictions_prob.max(0, keepdim=True)[0]  # (s, vocab_size)
-            # print(predictions_prob.shape)
-            # print(predictions_prob)
+            )  
             # Get the top_k predictions
             if i_lev == 0:
                 top_k_scores, top_k_words = predictions_prob[0].topk(k, 0, True, True)
@@ -574,31 +685,7 @@ class ConvnetAttnLstm(BaseModel):
                 # Unroll and find top scores, and their unrolled indices
                 top_k_scores, top_k_words = predictions_prob.view(-1).topk(k, 0, True, True)  # (s)
 
-            # print(top_k_scores)
 
-            # print(top_k_words)
-
-            # embeddings = self.decoder.embedding(decoder_inp).squeeze(1)  # (s, embed_dim)
-
-            # awe, _ = self.decoder.attention(image_embedding, h)  # (s, encoder_dim), (s, num_pixels)
-
-            # gate = self.decoder.sigmoid(self.decoder.f_beta(h))  # gating scalar, (s, encoder_dim)
-            # awe = gate * awe
-
-            # h, c = self.decoder.decode_step(torch.cat([embeddings, awe], dim=1), (h, c))  # (s, decoder_dim)
-
-            # scores = self.decoder.fc(h)  # (s, vocab_size)
-            # scores = F.log_softmax(scores, dim=1)
-            # print(scores)
-            # Add
-            # scores = top_k_scores.expand_as(scores) + scores  # (s, vocab_size)
-
-            # # For the first step, all k points will have the same scores (since same k previous words, h, c)
-            # if step == 1:
-            #     top_k_scores, top_k_words = scores[0].topk(k, 0, True, True)  # (s)
-            # else:
-            #     # Unroll and find top scores, and their unrolled indices
-            #     top_k_scores, top_k_words = scores.view(-1).topk(k, 0, True, True)  # (s)
 
             # Convert unrolled indices to actual indices of scores
             prev_word_inds = top_k_words // len(lev_dictionary)  # vocab_size  # (s)
@@ -628,75 +715,18 @@ class ConvnetAttnLstm(BaseModel):
             image_embedding = image_embedding[prev_word_inds[incomplete_inds]]
             top_k_scores = top_k_scores[incomplete_inds].unsqueeze(1)
             decoder_inp = next_word_inds[incomplete_inds].unsqueeze(1)
-            # print(decoder_inp)
-            # Break if things have been going on too long
-            # if step > 500:
-            #     break
-            # step += 1
+
 
         if len(complete_seqs_scores) == 0:
             seq = seqs[0].tolist()
         else:
             i = complete_seqs_scores.index(max(complete_seqs_scores))
             seq = complete_seqs[i]
-
-        print(seqs)
-
-        # # References
-        # img_caps = allcaps[0].tolist()
-        # img_captions = list(
-        #     map(lambda c: [w for w in c if w not in {self.dictionary['<start>'], self.dictionary['<end>'], self.dictionary['<pad>']}],
-        #         img_caps))  # remove <start> and pads
-        # references.append(img_captions)
-
-        # Hypotheses
-        # delete the first column in the generated seq
+            
         seqs = list(map(lambda l: l[1:], seqs))
-        # print(seqs)
-        # print('******')
-        # for ii in range(len(self.classifier_config)):
-        #     print('number of labels in level {} is {}'.format(ii, len(self.classifier_config[ii]['tokenizer'])))
-        # print(self.classifier_config)
+        return self.seq2str(seqs)
 
-        print(self.seq2str(seqs))
-
-        # result_idx = [
-        #     w for w in seq if w not in {self.dictionary["<start>"], self.dictionary["<end>"], self.dictionary["<pad>"]}
-        # ]
-        # result_str = [self.inv_dictionary[w] for w in result_idx]
-
-        # gt = batch["sequence"].squeeze(0).cpu().numpy().tolist()
-
-        # gt_idx = [
-        #     w for w in gt if w not in {self.dictionary["<start>"], self.dictionary["<end>"], self.dictionary["<pad>"]}
-        # ]
-        # gt_str = [self.inv_dictionary[w] for w in gt_idx]
-
-        # print("########")
-        # print(gt_str)
-        # print(result_str)
-        # if self.params.test.prediction_output_path is not None:
-        #     image_out = os.path.join(self.params.test.prediction_output_path, "img")
-        #     gt_out = os.path.join(self.params.test.prediction_output_path, "gt")
-        #     res_out = os.path.join(self.params.test.prediction_output_path, "res")
-
-        #     os.makedirs(image_out, exist_ok=True)
-        #     os.makedirs(gt_out, exist_ok=True)
-        #     os.makedirs(res_out, exist_ok=True)
-
-        #     filename = os.path.splitext(os.path.basename(batch["path"][0]))[0]
-
-        #     with open(os.path.join(gt_out, f"{filename}.tex"), "w") as f:
-        #         f.write("$" + " ".join(gt_str) + "$\n")
-
-        #     with open(os.path.join(res_out, f"{filename}.tex"), "w") as f:
-        #         f.write("$" + " ".join(result_str) + "$\n")
-
-        #     imageio.imwrite(
-        #         os.path.join(image_out, f"{filename}.jpg"), batch["image"].squeeze(0).squeeze(0).cpu().numpy()
-        #     )
-
-        # return {"loss": loss, "perplexity": perplexity, "gt_str": gt_str, "pred_str": result_str}
+    
 
     def seq2str(self, seqs):
         # reverse the indexes in dictionary to the string labels
@@ -704,7 +734,8 @@ class ConvnetAttnLstm(BaseModel):
         for seq in seqs:
             label_hirarchy = list()
             for i_lev in range(len(seq)):
-                label_hirarchy.append(self.classifier_config[i_lev]["tokenizer"][seq[i_lev]])
+                if seq[i_lev] != 0:
+                    label_hirarchy.append(self.classifier_config[i_lev]["tokenizer"][seq[i_lev]])
 
             # print(''.join(label_hirarchy))
             final_lbs.append("".join(label_hirarchy))
@@ -718,8 +749,12 @@ class ConvnetAttnLstm(BaseModel):
         # args, _ = parser.parse_known_args()
         # if "classifier_path" not in args:
         parser.add_argument("--mapping_path", type=str)
-
-        parser.add_argument("--use_focal_loss", action="store_true")
+        parser.add_argument("--label_mapping_path", type=str)
+        
+        parser.add_argument("--use_diverse_beam_search", action="store_true", default=False)
+        parser.add_argument("--div_beam_s_group", type=int, default=2)
+        
+        parser.add_argument("--use_focal_loss", action="store_true", default=False)
         parser.add_argument("--focal_loss_gamma", type=float, default=2)
         parser.add_argument("--focal_loss_alpha", type=float, default=0.25)
 
@@ -746,21 +781,16 @@ class BahdanauAttention(nn.Module):
         encoder_out: encoded images, a tensor of dimension (batch_size, num_channels, encoder_dim)
         """
         decoder_hidden_with_time_axis = torch.unsqueeze(decoder_hidden, 1)  # (batch_size, 1, decoder_dim)
-        # print('decoder_hidden_with_time_axis.shape {}'.format(decoder_hidden_with_time_axis.shape))
-        # print('encoder_out.shape{}'.format(encoder_out.shape))
-        # print('hidden {}'.format(decoder_hidden.shape))
+
 
         attention_hidden_layer = self.tanh(
             self.w_enc(encoder_out) + self.w_dec(decoder_hidden_with_time_axis)
-        )  # (batch_size,channel, attention_dim)
-        # print('score {}'.format(attention_hidden_layer.shape))
+        )  
         attention_weights = self.softmax(self.full_att(attention_hidden_layer).squeeze(2))  # (batch_size, channels)
 
         attention_weighted_encoding = (encoder_out * attention_weights.unsqueeze(2)).sum(
-            dim=1
-        )  # (batch_size, encoder_dim)
-        # print('context vector {}'.format(attention_weighted_encoding.shape))
-        # print('attntion weights {}'.format(attention_weights.shape))
+            dim=1)
+
         return attention_weighted_encoding, attention_weights
 
 
@@ -793,44 +823,23 @@ class Decoder(nn.Module):
         #caption_lengths: caption lengths, a tensor of dimension (batch_size, 1)
         return: scores for vocabulary, sorted encoded captions, decode lengths, weights, sort indices
         """
-        # print("#############################")
-        # print(f"image_emb: {encoder_out.shape}")
-
-        # print(f"hidden: {hidden.shape}")
-        # print(f"x: {x.shape}")
+       
         context_vec, attention_weights = self.attention(encoder_out, hidden)
 
-        # print(level)
-        # print(x.shape)
+       
         if level < 9:
             x = self.embedding[level](x)
-        # print(f"emb: {x.shape}")
-        # print(f"context: {context_vec.shape}")
-        # else:??
-        #    x = self.embedding[7](decoder_inp)
-        # print(x.shape)
-        # print(context_vec.shape)
-        x = torch.cat([context_vec, x], dim=1)
-        # print('before gru {}'.format(x.shape))
-        # print(f"{level} {hidden.shape}")
-        # print(hidden)
-        # print(x.shape)
+
+
+        x = torch.cat([context_vec, torch.squeeze(x,1)], dim=1)
+
         output = self.gru(x, hidden)
-        # print(output.shape)
-        # print('output after gru {}'.format(output.shape))
 
-        # output = output.permute(1, 0, 2)
-
-        # print('state after gru {}'.format(state.shape))
         x = self.fc1(output)
-        # x = torch.reshape(x, (-1, x.size()[2]))
-        # print('after gru reshape {}'.format(x.shape))
+
         if level < 9:
             x = self.fc3[level](x)
-        # else:???
-        #    x = self.fc2[7](x)
-        #    x = self.fc3[7](x)
-        # print('output of decoder{}'.format(x.shape))
+
         return x, output, attention_weights
 
     def reset_state(self, batch_size):

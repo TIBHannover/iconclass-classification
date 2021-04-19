@@ -57,10 +57,9 @@ def main():
     # model.to("cuda:0")
 
     for batch in dataset.infer():
-        print(batch.keys())
+
         for prediction in model.infer_step(batch, k=20):
-            for c in prediction["classes"]:
-                print(f"{c['id']} {c['txt']}")
+            print(f"{prediction['id']} {prediction['txt']}")
             # print(prediction)
 
     return 0

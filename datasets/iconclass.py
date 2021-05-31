@@ -137,7 +137,7 @@ class IconclassDataloader:
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             drop_last=True,
-            collate_fn=PadCollate(pad_values={"image": 0.0, "image_mask": False, "parents": "#PAD"}),
+            collate_fn=PadCollate(pad_values={"image": 0.0, "image_mask": False, "parents":"#PAD"}),
         )
         return dataloader
 
@@ -171,7 +171,7 @@ class IconclassDataloader:
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             drop_last=True,
-            collate_fn=PadCollate(pad_values={"image": 0.0, "image_mask": False, "parents": "#PAD"}),
+            collate_fn=PadCollate(pad_values={"image": 0.0, "image_mask": False, "parents":"#PAD"}),
         )
         return dataloader
 
@@ -215,7 +215,7 @@ class IconclassDataloader:
         transforms = torchvision.transforms.Compose(
             [
                 torchvision.transforms.ToPILImage(),
-                RandomResize([self.infer_size], max_size=self.max_size),
+                torchvision.transforms.Resize(size=256),
                 torchvision.transforms.ToTensor(),
                 torchvision.transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
             ]
@@ -253,7 +253,7 @@ class IconclassDataloader:
         parser.add_argument("--val_path", type=str)
         parser.add_argument("--val_annotation_path", type=str)
         parser.add_argument("--val_filter_min_dim", type=int, default=128, help="delete images with smaller size")
-        parser.add_argument("--val_size", type=int, default=640)
+        parser.add_argument("--val_size", type=int, default=224)
 
         parser.add_argument("--test_path", type=str)
         parser.add_argument("--test_annotation_path", type=str)

@@ -21,6 +21,7 @@ from models.loss import FocalBCEWithLogitsLoss
 from pytorch_lightning.core.decorators import auto_move_data
 
 from models.encoder import Encoder
+from sklearn.metrics import fbeta_score
 
 
 @ModelsManager.export("convnet_attn_lstm")
@@ -190,14 +191,16 @@ class ConvnetAttnLstm(BaseModel):
             )
             parents_lvl = [None] * image.shape[0]
             for i_lev in range(len(target)):
-                decoder_inp = source[i_lev]
                 predictions, hidden, _ = self.decoder(decoder_inp, image_embedding, hidden, i_lev)
                 loss += torch.mean(self.loss(predictions, target[i_lev]))
+                decoder_inp = source[i_lev]
 
                 source_indexes, target_indexes = self.map_level_prediction(parents_lvl)
 
                 flat_prediction[target_indexes] = torch.sigmoid(predictions)[source_indexes]
+
                 # Compute normalized version (maxprediction == 1.)
+
                 flat_prediction_norm[target_indexes] = torch.sigmoid(predictions)[source_indexes] / torch.max(
                     torch.sigmoid(predictions)
                 )

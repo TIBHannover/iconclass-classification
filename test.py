@@ -13,6 +13,8 @@ from callbacks import ModelCheckpoint, ProgressPrinter, LogImageCallback  # , Lo
 from datasets import DatasetsManager
 from models import ModelsManager
 
+from pytorch_lightning.utilities.cloud_io import load as pl_load
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="", conflict_handler="resolve")
@@ -41,13 +43,24 @@ def main():
 
     # for x in dataset.test():
     #     print(x)
-    # exit()
+    #     exit()
     model = ModelsManager().build_model(name=args.model, args=args)
-
+    
     trainer = pl.Trainer.from_argparse_args(args)
 
-    print(trainer.test(model, test_dataloaders=dataset.test()))
+    checkpoint_data = pl_load(args.resume_from_checkpoint, map_location=lambda storage, loc: storage)
 
+    model.load_state_dict(checkpoint_data["state_dict"])
+    model.freeze()
+    model.eval()
+    
+    print(trainer.test(model, test_dataloaders=dataset.test()))
+    
+    # for batch in dataset.infer():
+
+    #     for prediction in model.infer_step(batch, k=20):
+    #         print(f"{prediction['id']} {prediction['txt']}")
+    #         # print(prediction)
     return 0
 
 

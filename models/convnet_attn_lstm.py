@@ -24,6 +24,8 @@ from models.encoder import Encoder
 from sklearn.metrics import fbeta_score
 
 
+import pandas as pd
+
 @ModelsManager.export("convnet_attn_lstm")
 class ConvnetAttnLstm(BaseModel):
     def __init__(self, args=None, **kwargs):
@@ -40,7 +42,8 @@ class ConvnetAttnLstm(BaseModel):
         self.mapping_path = dict_args.get("mapping_path", None)
         self.classifier_path = dict_args.get("classifier_path", None)
         self.label_mapping_path = dict_args.get("label_mapping_path", None)
-
+        self.outpath_f2_per_lbs = dict_args.get("outpath_f2_per_lbs", None)
+        
         self.use_diverse_beam_search = dict_args.get("use_diverse_beam_search", None)
         self.div_beam_s_group = dict_args.get("div_beam_s_group", None)
 
@@ -48,7 +51,9 @@ class ConvnetAttnLstm(BaseModel):
         self.focal_loss_gamma = dict_args.get("focal_loss_gamma", None)
         self.focal_loss_alpha = dict_args.get("focal_loss_alpha", None)
         self.filter_label_by_count = dict_args.get("filter_label_by_count", None)
-
+        
+        self.best_threshold = dict_args.get("best_threshold", None)
+        
         self.mapping_config = []
         if self.mapping_path is not None:
             self.mapping_config = read_jsonl(self.mapping_path)
@@ -213,7 +218,8 @@ class ConvnetAttnLstm(BaseModel):
             total_loss = loss / len(target)
 
             tt = flat_target.detach().cpu().numpy()
-            pp = flat_prediction.detach().cpu().numpy()
+            # pp = flat_prediction.detach().cpu().numpy()
+            pp = flat_prediction_norm.detach().cpu().numpy()
             ll = total_loss.detach().cpu().numpy()
 
             self.all_targets.append(tt)
@@ -265,33 +271,33 @@ class ConvnetAttnLstm(BaseModel):
             loss += output["loss"]
             count += 1
 
-        # f1score prediction
-        f1_score = self.f1_val.compute().cpu().detach()
-        self.log("val/f1", np.nanmean(f1_score), prog_bar=True)
-        f1_score[~mask] = np.nan
-        self.log("val/f1_mask", np.nanmean(f1_score), prog_bar=True)
+        # # f1score prediction
+        # f1_score = self.f1_val.compute().cpu().detach()
+        # self.log("val/f1", np.nanmean(f1_score), prog_bar=True)
+        # f1_score[~mask] = np.nan
+        # self.log("val/f1_mask", np.nanmean(f1_score), prog_bar=True)
 
-        level_results = {}
-        for i, x in enumerate(self.mapping_config):
-            if len(x["parents"]) not in level_results:
-                level_results[len(x["parents"])] = []
-            level_results[len(x["parents"])].append(f1_score[x["index"]])
-        for depth, x in sorted(level_results.items(), key=lambda x: x[0]):
-            self.log(f"val/f1_{depth}", np.nanmean(torch.stack(x, dim=0)), prog_bar=False)
+        # level_results = {}
+        # for i, x in enumerate(self.mapping_config):
+        #     if len(x["parents"]) not in level_results:
+        #         level_results[len(x["parents"])] = []
+        #     level_results[len(x["parents"])].append(f1_score[x["index"]])
+        # for depth, x in sorted(level_results.items(), key=lambda x: x[0]):
+        #     self.log(f"val/f1_{depth}", np.nanmean(torch.stack(x, dim=0)), prog_bar=False)
 
-        # f1score each layer normalized prediction
-        f1_norm_score = self.f1_val_norm.compute().cpu().detach()
-        self.log("val/f1_norm", np.nanmean(f1_norm_score), prog_bar=True)
-        f1_norm_score[~mask] = np.nan
-        self.log("val/f1_norm_mask", np.nanmean(f1_norm_score), prog_bar=True)
+        # # f1score each layer normalized prediction
+        # f1_norm_score = self.f1_val_norm.compute().cpu().detach()
+        # self.log("val/f1_norm", np.nanmean(f1_norm_score), prog_bar=True)
+        # f1_norm_score[~mask] = np.nan
+        # self.log("val/f1_norm_mask", np.nanmean(f1_norm_score), prog_bar=True)
 
-        level_results = {}
-        for i, x in enumerate(self.mapping_config):
-            if len(x["parents"]) not in level_results:
-                level_results[len(x["parents"])] = []
-            level_results[len(x["parents"])].append(f1_norm_score[x["index"]])
-        for depth, x in sorted(level_results.items(), key=lambda x: x[0]):
-            self.log(f"val/f1_norm_{depth}", np.nanmean(torch.stack(x, dim=0)), prog_bar=False)
+        # level_results = {}
+        # for i, x in enumerate(self.mapping_config):
+        #     if len(x["parents"]) not in level_results:
+        #         level_results[len(x["parents"])] = []
+        #     level_results[len(x["parents"])].append(f1_norm_score[x["index"]])
+        # for depth, x in sorted(level_results.items(), key=lambda x: x[0]):
+        #     self.log(f"val/f1_norm_{depth}", np.nanmean(torch.stack(x, dim=0)), prog_bar=False)
 
         self.log("val/loss", loss / count, prog_bar=True)
 
@@ -314,7 +320,7 @@ class ConvnetAttnLstm(BaseModel):
             return mask
 
         def get_score(y_pred, all_targets):
-            return fbeta_score(all_targets, y_pred, beta=2, average="samples")
+            return fbeta_score(all_targets, y_pred, beta=2, average="macro")
 
         self.all_predictions = np.concatenate(self.all_predictions, axis=0)
         self.all_targets = np.concatenate(self.all_targets, axis=0)
@@ -347,87 +353,25 @@ class ConvnetAttnLstm(BaseModel):
 
         # hidden = self.decoder.reset_state(image.shape[0]).to(image.device.index)
         # print(hidden.device)
-
-        parents_lvl = [None] * image.shape[0]
+        hidden = self.decoder.init_hidden_state(image_embedding)
+        
+        # Feed <START> to the model in the first layer 1==<START>
+        decoder_inp = torch.ones([image.shape[0]], dtype=torch.int64).to(image.device.index)
 
         loss = 0
         # Check if batch contains all traces (target [BATCH_SIZE, MAX_SEQUENCE, LEVEL, MAX_CLASSIFIER])
         if "mask" in batch:
+            for i_lev in range(target.shape[2]):
+                decoder_inp = source[i_lev]
+                predictions, hidden, _ = self.decoder(decoder_inp, image_embedding, hidden, i_lev)
 
-            flat_prediction = torch.zeros(image.shape[0], len(self.mapping_config), dtype=image_embedding.dtype).to(
-                image.device.index
-            )
-            flat_prediction_norm = torch.zeros(
-                image.shape[0], len(self.mapping_config), dtype=image_embedding.dtype
-            ).to(image.device.index)
-            flat_target = torch.zeros(image.shape[0], len(self.mapping_config), dtype=target[0].dtype).to(
-                image.device.index
-            )
-            flat_counter = torch.zeros(image.shape[0], len(self.mapping_config), dtype=target[0].dtype).to(
-                image.device.index
-            )
+                prediction_size = len(self.classifier_config[i_lev]["tokenizer"])
 
-            # iterate over pathes in the hierarchy for each image
-            for i_seq_mask in range(target.shape[1]):
-                hidden = self.decoder.init_hidden_state(image_embedding)
-                # Feed <START> to the model in the first layer 1==<START>
-                decoder_inp = torch.ones([image.shape[0]], dtype=torch.int64).to(image.device.index)
-                # build parents_list for each path
-                parents_per_hpath = []
-                for i_batch, seqs_list in enumerate(parents):
-                    if i_seq_mask < len(seqs_list):
-                        parents_per_hpath.append(seqs_list[i_seq_mask])
-                    else:
-                        parents_per_hpath.append([None])
+                target_lev = target[:, 0, i_lev, :prediction_size]  # loop over the max_seq
+                loss += torch.mean(self.loss(predictions, target_lev))
+                decoder_inp = torch.unsqueeze(source[:, 0, i_lev], dim=1)
 
-                # iterate over levels
-                for i_lev in range(target.shape[2]):
-
-                    predictions, hidden, _ = self.decoder(decoder_inp, image_embedding, hidden, i_lev)
-
-                    prediction_size = len(self.classifier_config[i_lev]["tokenizer"])
-
-                    target_lev = target[:, i_seq_mask, i_lev, :prediction_size]
-
-                    mask_index = batch["mask"][:, i_seq_mask].nonzero(as_tuple=True)[0]
-
-                    # ignore images without sequence
-                    valid_target_lev = torch.index_select(target_lev, 0, mask_index)
-                    valid_predictions_lev = torch.index_select(predictions, 0, mask_index)
-
-                    loss += torch.mean(self.loss(valid_predictions_lev, valid_target_lev))
-                    decoder_inp = source[
-                        :, i_seq_mask, i_lev
-                    ]  # TODO decoder_inp comes from true labels in the validatrion, change it to prediction result
-                    source_indexes, target_indexes = self.map_level_prediction(parents_lvl)
-
-                    # counter for meeting each seq several times
-                    flat_counter[target_indexes] += 1
-                    flat_prediction[target_indexes] = (
-                        flat_prediction[target_indexes] + torch.sigmoid(predictions)[source_indexes]
-                    )
-
-                    # Compute normalized version (maxprediction == 1.)
-                    flat_prediction_norm[target_indexes] = flat_prediction_norm[target_indexes] + torch.sigmoid(
-                        predictions
-                    )[source_indexes] / torch.max(torch.sigmoid(predictions))
-
-                    flat_target[target_indexes] = (
-                        flat_target[target_indexes] + target[:, i_seq_mask, i_lev][source_indexes]
-                    )
-
-                    # get parent level
-                    parents_lvl = [x[i_lev] if x[0] is not None else "#PAD" for x in parents_per_hpath]
-
-            # normalizing scores
-            total_loss = loss / (target.shape[2] + target.shape[1])
-            # flat_prediction /= flat_counter
-            # flat_prediction_norm /= flat_counter
-            # flat_target /= flat_counter
         else:
-            hidden = self.decoder.init_hidden_state(image_embedding)
-            # Feed <START> to the model in the first layer 1==<START>
-            decoder_inp = torch.ones([image.shape[0]], dtype=torch.int64).to(image.device.index)
 
             flat_prediction = torch.zeros(image.shape[0], len(self.mapping_config), dtype=image_embedding.dtype).to(
                 image.device.index
@@ -441,63 +385,155 @@ class ConvnetAttnLstm(BaseModel):
             )
             parents_lvl = [None] * image.shape[0]
             for i_lev in range(len(target)):
-
                 predictions, hidden, _ = self.decoder(decoder_inp, image_embedding, hidden, i_lev)
-
                 loss += torch.mean(self.loss(predictions, target[i_lev]))
                 decoder_inp = source[i_lev]
 
                 source_indexes, target_indexes = self.map_level_prediction(parents_lvl)
 
                 flat_prediction[target_indexes] = torch.sigmoid(predictions)[source_indexes]
+
                 # Compute normalized version (maxprediction == 1.)
+
                 flat_prediction_norm[target_indexes] = torch.sigmoid(predictions)[source_indexes] / torch.max(
                     torch.sigmoid(predictions)
                 )
 
                 flat_target[target_indexes] = target[i_lev][source_indexes]
+
+                # parents_lvl = parents[i_lev]
                 parents_lvl = [x[i_lev] for x in parents]
+
             total_loss = loss / len(target)
-        self.f1_test(flat_prediction, flat_target)
-        self.f1_test_norm(flat_prediction_norm, flat_target)
+
+            tt = flat_target.detach().cpu().numpy()
+            pp = flat_prediction.detach().cpu().numpy()
+            ll = total_loss.detach().cpu().numpy()
+
+            self.all_targets.append(tt)
+            self.all_predictions.append(pp)
+            self.all_losses.append(ll)
 
         return {
-            "loss": total_loss,
+            "test/loss": total_loss,
         }
 
+    def map_level_prediction(self, parents):
+        target_indexes = []
+        source_indexes = []
+        # print(parents)
+        for batch_id, parent in enumerate(parents):
+            if parent not in self.mapping_lut:
+                continue
+            p = self.mapping_lut[parent]
+            for source_id, target_id in p.items():
+                target_indexes.append([batch_id, target_id])
+                source_indexes.append([batch_id, source_id])
+
+        source_indexes = np.asarray(source_indexes)
+        target_indexes = np.asarray(target_indexes)
+        if len(source_indexes.shape) < 2:
+            return np.zeros([2, 0]), np.zeros([2, 0])
+
+        return np.swapaxes(source_indexes, 0, 1), np.swapaxes(target_indexes, 0, 1)
+        
+
+    def on_test_epoch_start(self):
+        self.all_predictions = []
+        self.all_targets = []
+        self.all_losses = []
+        self.f_values = pd.DataFrame()
     def test_epoch_end(self, outputs):
+
+        if self.filter_label_by_count is not None and self.filter_label_by_count > 0:
+            mask = torch.zeros(len(self.mapping_config), dtype=torch.bool)
+            for x in self.mapping_config:
+                mask[x["index"]] = True if x["count"] > self.filter_label_by_count else False
+        else:
+            mask = torch.ones(len(self.mapping_config), dtype=torch.bool)
+
+        self.log("test/number_of_labels", torch.sum(mask), prog_bar=True)  # TODO False
 
         loss = 0.0
         count = 0
         for output in outputs:
-            loss += output["loss"]
+            loss += output["test/loss"]
             count += 1
 
-        # f1score prediction
-        f1_score = self.f1_test.compute().cpu().detach()
-        self.log("test/f1", np.nanmean(f1_score), prog_bar=True)
+        # # f1score prediction
+        # f1_score = self.f1_val.compute().cpu().detach()
+        # self.log("test/f1", np.nanmean(f1_score), prog_bar=True)
+        # f1_score[~mask] = np.nan
+        # self.log("val/f1_mask", np.nanmean(f1_score), prog_bar=True)
 
-        level_results = {}
-        for i, x in enumerate(self.mapping_config):
-            if len(x["parents"]) not in level_results:
-                level_results[len(x["parents"])] = []
-            level_results[len(x["parents"])].append(f1_score[x["index"]])
-        for depth, x in sorted(level_results.items(), key=lambda x: x[0]):
-            self.log(f"test/f1_{depth}", np.nanmean(torch.stack(x, dim=0)), prog_bar=True)
+        # level_results = {}
+        # for i, x in enumerate(self.mapping_config):
+        #     if len(x["parents"]) not in level_results:
+        #         level_results[len(x["parents"])] = []
+        #     level_results[len(x["parents"])].append(f1_score[x["index"]])
+        # for depth, x in sorted(level_results.items(), key=lambda x: x[0]):
+        #     self.log(f"val/f1_{depth}", np.nanmean(torch.stack(x, dim=0)), prog_bar=False)
 
-        # f1score each layer normalized prediction
-        f1_norm_score = self.f1_test_norm.compute().cpu().detach()
-        self.log("test/f1_norm", np.nanmean(f1_norm_score), prog_bar=True)
+        # # f1score each layer normalized prediction
+        # f1_norm_score = self.f1_val_norm.compute().cpu().detach()
+        # self.log("val/f1_norm", np.nanmean(f1_norm_score), prog_bar=True)
+        # f1_norm_score[~mask] = np.nan
+        # self.log("val/f1_norm_mask", np.nanmean(f1_norm_score), prog_bar=True)
 
-        level_results = {}
-        for i, x in enumerate(self.mapping_config):
-            if len(x["parents"]) not in level_results:
-                level_results[len(x["parents"])] = []
-            level_results[len(x["parents"])].append(f1_norm_score[x["index"]])
-        for depth, x in sorted(level_results.items(), key=lambda x: x[0]):
-            self.log(f"test/f1_norm_{depth}", np.nanmean(torch.stack(x, dim=0)), prog_bar=True)
+        # level_results = {}
+        # for i, x in enumerate(self.mapping_config):
+        #     if len(x["parents"]) not in level_results:
+        #         level_results[len(x["parents"])] = []
+        #     level_results[len(x["parents"])].append(f1_norm_score[x["index"]])
+        # for depth, x in sorted(level_results.items(), key=lambda x: x[0]):
+        #     self.log(f"val/f1_norm_{depth}", np.nanmean(torch.stack(x, dim=0)), prog_bar=False)
 
         self.log("test/loss", loss / count, prog_bar=True)
+
+        def binarize_prediction(probabilities, threshold: float, argsorted=None, min_labels=1, max_labels=10):
+            """Return matrix of 0/1 predictions, same shape as probabilities."""
+            # assert probabilities.shape[1] == self.num_classes
+            if argsorted is None:
+                argsorted = probabilities.argsort(axis=1)
+
+            max_mask = _make_mask(argsorted, max_labels)
+            min_mask = _make_mask(argsorted, min_labels)
+            prob_mask = probabilities > threshold
+            return (max_mask & prob_mask) | min_mask
+
+        def _make_mask(argsrtd, top_n: int):
+            mask = np.zeros_like(argsrtd, dtype=np.uint8)
+            col_indices = argsrtd[:, -top_n:].reshape(-1)
+            row_indices = [i // top_n for i in range(len(col_indices))]
+            mask[row_indices, col_indices] = 1
+            return mask
+
+        def get_score(y_pred, all_targets):
+            return fbeta_score(all_targets, y_pred, beta=2, average=None)
+
+        self.all_predictions = np.concatenate(self.all_predictions, axis=0)
+        self.all_targets = np.concatenate(self.all_targets, axis=0)
+        self.all_losses = np.stack(self.all_losses)
+
+        nonfiltered_lbs = np.where(~mask.numpy())
+        self.all_predictions = np.delete(self.all_predictions, nonfiltered_lbs, axis=1)
+        self.all_targets = np.delete(self.all_targets, nonfiltered_lbs, axis=1)
+        metrics = {}
+        arg_sorted = self.all_predictions.argsort(axis=1)
+        for threshold in self.best_threshold:
+            sc= get_score(
+                binarize_prediction(self.all_predictions, threshold, arg_sorted), self.all_targets
+            )
+            metrics[f"test_f2_th_{threshold:.2f}"] = sc
+            self.f_values[f"test_f2_th_{threshold:.2f}"] = sc
+
+           
+        metrics["test_loss"] = np.mean(self.all_losses)
+        self.f_values['num_lbs'] = np.sum(self.all_targets, axis = 0)
+        
+        print('saving the F-scores for each label')
+        self.f_values.to_csv(self.outpath_f2_per_lbs)
+
 
     @auto_move_data
     def infer_step(self, batch, k=10):
@@ -745,6 +781,7 @@ class ConvnetAttnLstm(BaseModel):
         parser.add_argument("--classifier_path", type=str)
         parser.add_argument("--mapping_path", type=str)
         parser.add_argument("--label_mapping_path", type=str)
+        parser.add_argument("--outpath_f2_per_lbs", type=str)
 
         parser.add_argument("--use_diverse_beam_search", action="store_true", default=False)
         parser.add_argument("--div_beam_s_group", type=int, default=2)
@@ -754,6 +791,8 @@ class ConvnetAttnLstm(BaseModel):
         parser.add_argument("--focal_loss_alpha", type=float, default=0.25)
 
         parser.add_argument("--filter_label_by_count", type=int, default=0)
+        
+        parser.add_argument("--best_threshold", nargs="+",type=float, default=[0.2])
         return parser
 
 

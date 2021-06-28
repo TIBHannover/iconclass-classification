@@ -71,7 +71,8 @@ def main():
                 label_sum = d_filtered
             else:
                 label_sum = np.sum(np.concatenate([d_filtered, label_sum], axis=0), axis=0, keepdims=True)
-
+            
+                aa = label_sum.T
             # print(d["target"].shape)
             max_value = np.amax(np.asarray(label_sum))
             weights = count / (label_sum.shape[1] * label_sum)
@@ -90,12 +91,17 @@ def main():
         cnt = 0
         for x in mapping_list:
             if x['count'] >= args.filter_label_by_count:
-                print(x)
+                # print(x)
                 f.write(
                     json.dumps({**x, "count": label_sum[0, cnt].item(), "weight": weights[0, cnt].item(), "weight_pos": weight_positive[0, cnt].item()})
                     + "\n"
                 )
                 cnt +=1
+            else:
+                f.write(
+                    json.dumps({**x, "count": 0, "weight": 0, "weight_pos": 0})
+                    + "\n"
+                    )
     return 0
 
 

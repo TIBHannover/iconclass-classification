@@ -1,5 +1,6 @@
 import re
 import argparse
+import logging
 
 import numpy as np
 
@@ -46,7 +47,10 @@ class ConvnetAttnLstm(BaseModel):
         
         self.use_diverse_beam_search = dict_args.get("use_diverse_beam_search", None)
         self.div_beam_s_group = dict_args.get("div_beam_s_group", None)
-
+        
+        self.use_label_smoothing = dict_args.get("use_label_smoothing", None)
+        self.LABEL_SMOOTHING_factor =0.008 #TODO
+        self.using_weights = dict_args.get("using_weights", None)
         self.use_focal_loss = dict_args.get("use_focal_loss", None)
         self.focal_loss_gamma = dict_args.get("focal_loss_gamma", None)
         self.focal_loss_alpha = dict_args.get("focal_loss_alpha", None)
@@ -76,7 +80,11 @@ class ConvnetAttnLstm(BaseModel):
 
         if self.label_mapping_path is not None:
             self.label_mapping = read_jsonl_lb_mapping(self.label_mapping_path)
-
+        
+        # if self.use_weights is not None:
+        #     self.weights = [x['weight'] for x in self.mapping_config]
+        #     self.weights = np.array(self.weights)
+            
         self.max_level = len(self.classifier_config)
 
         self.vocabulary_size = [len(x["tokenizer"]) for x in self.classifier_config]  # get from tockenizer
@@ -88,13 +96,23 @@ class ConvnetAttnLstm(BaseModel):
         self.decoder = Decoder(
             self.vocabulary_size, self.embedding_dim, self.attention_dim, self.embedding_dim, self.max_vocab_size
         )
+        
+        if self.using_weights:
+            logging.info("Using weighting for loss")
 
+            # for x in self.mapping_config:
+                # self.weights[0, x["class_id"]] = x["weight"]
+            self.weights = [x['weight_pos'] for x in self.mapping_config]
+            self.weights = torch.Tensor(self.weights)
+        else:
+            self.weights = torch.ones(len(self.mapping_config))
+        print(self.weights)
         if self.use_focal_loss:
             self.loss = FocalBCEWithLogitsLoss(
                 reduction="none", gamma=self.focal_loss_gamma, alpha=self.focal_loss_alpha
             )
         else:
-            self.loss = torch.nn.BCEWithLogitsLoss(reduction="none")
+            self.loss = torch.nn.BCEWithLogitsLoss(reduction="none", pos_weight=self.weights)
 
         self.all_predictions = []
         self.all_targets = []
@@ -107,6 +125,7 @@ class ConvnetAttnLstm(BaseModel):
         image = batch["image"]
         source = batch["source_id_sequence"]
         target = batch["target_vec"]
+        parents = batch["parents"]
 
         self.image = image
         # image = F.interpolate(image, size = (299,299), mode= 'bicubic', align_corners=False)
@@ -122,24 +141,38 @@ class ConvnetAttnLstm(BaseModel):
         decoder_inp = torch.ones([image.shape[0]], dtype=torch.int64).to(image.device.index)
 
         loss = 0
-        predictions_list = []
-
+        # predictions_list = []
+        parents_lvl = [None] * image.shape[0]
+        flat_prediction = torch.zeros(image.shape[0], len(self.mapping_config),
+                                      dtype=image_embedding.dtype).to(image.device.index)
+        flat_target = torch.zeros(image.shape[0], len(self.mapping_config), 
+                                  dtype=target[0].dtype).to(image.device.index)
         for i_lev in range(len(target)):
             predictions, hidden, _ = self.decoder(decoder_inp, image_embedding, hidden, i_lev)
             # print(f"Pre: {torch.min(predictions)} {torch.max(predictions)} {torch.mean(predictions)}")
             # print(
             #     f"Post: {torch.min(torch.sigmoid(predictions))} {torch.max(torch.sigmoid(predictions))} {torch.mean(torch.sigmoid(predictions))}"
             # )
-            predictions_list.append(torch.sigmoid(predictions))
-
-            loss += torch.mean(self.loss(predictions, target[i_lev]))
+            # predictions_list.append(torch.sigmoid(predictions))
+            
+            source_indexes, target_indexes = self.map_level_prediction(parents_lvl)
+            parents_lvl = [x[i_lev] for x in parents]
+            flat_prediction[target_indexes] = torch.sigmoid(predictions)[source_indexes]
+            flat_target[target_indexes] = target[i_lev][source_indexes]
+            
+            # loss += torch.mean(self.loss(predictions, target[i_lev]))
             decoder_inp = source[i_lev]
             # decoder_inp = torch.tensor(target[i_lev]).to(torch.int64).to(image.device.index)
+        
+        if self.use_label_smoothing:
+            targets_smooth = flat_target.float() * (1 - self.LABEL_SMOOTHING_factor) + 0.5 * self.LABEL_SMOOTHING_factor
+        else:
+            targets_smooth = flat_target
+        lloss = self.loss(flat_prediction, targets_smooth)
+        # total_loss = loss / len(target)
 
-        total_loss = loss / len(target)
-
-        loss = total_loss
-        return {"loss": torch.mean(loss), "predictions": predictions_list, "targets": target}
+        # loss = total_loss
+        return {"loss":lloss}
 
     def training_step_end(self, outputs):
         self.log("train/loss", outputs["loss"].mean(), prog_bar=True)
@@ -197,7 +230,7 @@ class ConvnetAttnLstm(BaseModel):
             parents_lvl = [None] * image.shape[0]
             for i_lev in range(len(target)):
                 predictions, hidden, _ = self.decoder(decoder_inp, image_embedding, hidden, i_lev)
-                loss += torch.mean(self.loss(predictions, target[i_lev]))
+                # loss += torch.mean(self.loss(predictions, target[i_lev]))
                 decoder_inp = source[i_lev]
 
                 source_indexes, target_indexes = self.map_level_prediction(parents_lvl)
@@ -215,7 +248,11 @@ class ConvnetAttnLstm(BaseModel):
                 # parents_lvl = parents[i_lev]
                 parents_lvl = [x[i_lev] for x in parents]
 
-            total_loss = loss / len(target)
+            # total_loss = loss / len(target)
+
+
+            
+            total_loss = torch.mean(self.loss(flat_prediction, flat_target))
 
             tt = flat_target.detach().cpu().numpy()
             # pp = flat_prediction.detach().cpu().numpy()
@@ -785,7 +822,9 @@ class ConvnetAttnLstm(BaseModel):
 
         parser.add_argument("--use_diverse_beam_search", action="store_true", default=False)
         parser.add_argument("--div_beam_s_group", type=int, default=2)
-
+        
+        parser.add_argument("--use_label_smoothing", action="store_true", default=False)
+        parser.add_argument("--using_weights", action="store_true", default=False)
         parser.add_argument("--use_focal_loss", action="store_true", default=False)
         parser.add_argument("--focal_loss_gamma", type=float, default=2)
         parser.add_argument("--focal_loss_alpha", type=float, default=0.25)

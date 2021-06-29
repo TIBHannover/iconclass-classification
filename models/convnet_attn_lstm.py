@@ -255,8 +255,8 @@ class ConvnetAttnLstm(BaseModel):
             total_loss = torch.mean(self.loss(flat_prediction, flat_target))
 
             tt = flat_target.detach().cpu().numpy()
-            # pp = flat_prediction.detach().cpu().numpy()
-            pp = flat_prediction_norm.detach().cpu().numpy()
+            pp = flat_prediction.detach().cpu().numpy()
+            # pp = flat_prediction_norm.detach().cpu().numpy()
             ll = total_loss.detach().cpu().numpy()
 
             self.all_targets.append(tt)

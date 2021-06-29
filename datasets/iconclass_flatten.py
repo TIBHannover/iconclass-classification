@@ -31,12 +31,14 @@ class IconclassFlattenDecoderPipeline(Pipeline):
     def __init__(self, mapping=None, classifier=None):
         self.mapping = mapping
         self.classifier = classifier
-
+        self.mapping_list = list(mapping)
+        
     def call(self, datasets=None, **kwargs):
         def decode(sample):
             y_onehot_0 = torch.zeros(len(self.mapping))
             for x in sample["classes"]:
-                y_onehot_0.scatter_(0, torch.tensor(self.mapping[x]["class_id"]), 1)
+                if x in self.mapping:
+                    y_onehot_0.scatter_(0, torch.tensor(self.mapping_list.index(x)), 1)
 
             if "additional" in sample:
                 return {"image_data": sample["image_data"], "additional": sample["additional"], "target": y_onehot_0}
@@ -57,11 +59,16 @@ class IconclassFlattenDataloader(IconclassDataloader):
 
         self.mapping_path = dict_args.get("mapping_path", None)
         self.classifier_path = dict_args.get("classifier_path", None)
+        self.filter_label_by_count = dict_args.get("filter_label_by_count", None)
 
         self.mapping = {}
+        mm = {}
         if self.mapping_path is not None:
-            self.mapping = read_jsonl(self.mapping_path, dict_key="id")
-
+            mm = read_jsonl(self.mapping_path, dict_key="id")
+            for k,v in mm.items():
+                if v['count'] >self.filter_label_by_count:
+                    self.mapping[k] = v
+            
         self.classifier = {}
         if self.classifier_path is not None:
             self.classifier = read_jsonl(self.classifier_path)
@@ -79,4 +86,5 @@ class IconclassFlattenDataloader(IconclassDataloader):
 
         parser.add_argument("--mapping_path", type=str)
         parser.add_argument("--classifier_path", type=str)
+        parser.add_argument("--filter_label_by_count", type=int, default=0)
         return parser

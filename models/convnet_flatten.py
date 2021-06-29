@@ -18,7 +18,7 @@ from models.base_model import BaseModel
 from datasets.utils import read_jsonl
 
 from models.utils import linear_rampup, cosine_rampdown
-
+from sklearn.metrics import fbeta_score
 
 @ModelsManager.export("convnet_flatten")
 class ConvnetFlatten(BaseModel):
@@ -39,10 +39,14 @@ class ConvnetFlatten(BaseModel):
         self.classifier_path = dict_args.get("classifier_path", None)
 
         self.using_weights = dict_args.get("using_weights", False)
+        self.filter_label_by_count = dict_args.get("filter_label_by_count", None)
 
         self.mapping_config = []
         if self.mapping_path is not None:
-            self.mapping_config = read_jsonl(self.mapping_path)
+            mm = read_jsonl(self.mapping_path)
+            for x in mm:
+                if x['count'] >self.filter_label_by_count:
+                    self.mapping_config.append(x)
 
         self.classifier_config = []
         if self.classifier_path is not None:
@@ -74,7 +78,7 @@ class ConvnetFlatten(BaseModel):
         self.weights = torch.tensor(self.weights)
         self.loss = torch.nn.BCEWithLogitsLoss()
 
-        self.f1_val = pl.metrics.classification.F1(num_classes=len(self.mapping_config), multilabel=True, average=None)
+        # self.f1_val = pl.metrics.classification.F1(num_classes=len(self.mapping_config), multilabel=True, average=None)
 
         self.byol_embedding_path = dict_args.get("byol_embedding_path", None)
 
@@ -119,13 +123,25 @@ class ConvnetFlatten(BaseModel):
         logits = self(image)
 
         loss = self.loss(logits, target)
-        self.f1_val(torch.sigmoid(logits), target)
+        # self.f1_val(torch.sigmoid(logits), target)
+        tt = target.detach().cpu().numpy()
+        # pp = flat_prediction.detach().cpu().numpy()
+        pp = torch.sigmoid(logits).detach().cpu().numpy()
+        ll = torch.mean(loss).detach().cpu().numpy()
+
+        self.all_targets.append(tt)
+        self.all_predictions.append(pp)
+        self.all_losses.append(ll)
 
         return {"loss": loss}
 
     # def validation_step_end(self, outputs):
     #     self.average_precision(outputs["pred"], outputs["target"])
     #     print(self.average_precision)
+    def on_validation_epoch_start(self):
+        self.all_predictions = []
+        self.all_targets = []
+        self.all_losses = []
 
     def validation_epoch_end(self, outputs):
 
@@ -134,16 +150,57 @@ class ConvnetFlatten(BaseModel):
         for output in outputs:
             loss += output["loss"]
             count += 1
-
+        
         self.log("val/loss", loss / count, prog_bar=True)
+        
+        def binarize_prediction(probabilities, threshold: float, argsorted=None, min_labels=1, max_labels=10):
+            """Return matrix of 0/1 predictions, same shape as probabilities."""
+            # assert probabilities.shape[1] == self.num_classes
+            if argsorted is None:
+                argsorted = probabilities.argsort(axis=1)
 
-        f1_score = self.f1_val.compute().cpu().detach()
+            max_mask = _make_mask(argsorted, max_labels)
+            min_mask = _make_mask(argsorted, min_labels)
+            prob_mask = probabilities > threshold
+            return (max_mask & prob_mask) | min_mask
 
-        self.log("val/f1", np.nanmean(f1_score), prog_bar=True)
+        def _make_mask(argsrtd, top_n: int):
+            mask = np.zeros_like(argsrtd, dtype=np.uint8)
+            col_indices = argsrtd[:, -top_n:].reshape(-1)
+            row_indices = [i // top_n for i in range(len(col_indices))]
+            mask[row_indices, col_indices] = 1
+            return mask
 
-        for i, x in enumerate(self.classifier_config):
+        def get_score(y_pred, all_targets):
+            return fbeta_score(all_targets, y_pred, beta=2, average="macro")
 
-            self.log(f"val/f1_{i}", np.nanmean(f1_score[x["range"][0] : x["range"][1]]), prog_bar=True)
+        self.all_predictions = np.concatenate(self.all_predictions, axis=0)
+        self.all_targets = np.concatenate(self.all_targets, axis=0)
+        self.all_losses = np.stack(self.all_losses)
+
+        # nonfiltered_lbs = np.where(~mask.numpy())
+        # self.all_predictions = np.delete(self.all_predictions, nonfiltered_lbs, axis=1)
+        # self.all_targets = np.delete(self.all_targets, nonfiltered_lbs, axis=1)
+        metrics = {}
+        arg_sorted = self.all_predictions.argsort(axis=1)
+        for threshold in [0.05, 0.07, 0.09, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4]:
+            metrics[f"valid_f2_th_{threshold:.2f}"] = get_score(
+                binarize_prediction(self.all_predictions, threshold, arg_sorted), self.all_targets
+            )
+        metrics["valid_loss"] = np.mean(self.all_losses)
+        # print(' | '.join(f'{k} {v:.3f}' for k, v in sorted(
+        #     metrics.items(), key=lambda kv: -kv[1])))
+        for kk, vv in sorted(metrics.items(), key=lambda kv: -kv[1]):
+            self.log(kk, np.nanmean(round(vv, 3)), prog_bar=True)
+
+
+        # f1_score = self.f1_val.compute().cpu().detach()
+
+        # self.log("val/f1", np.nanmean(f1_score), prog_bar=True)
+
+        # for i, x in enumerate(self.classifier_config):
+
+        #     self.log(f"val/f1_{i}", np.nanmean(f1_score[x["range"][0] : x["range"][1]]), prog_bar=True)
 
     @classmethod
     def add_args(cls, parent_parser):

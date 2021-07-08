@@ -4,6 +4,8 @@ import logging
 import torch
 import torchvision
 
+from PIL import Image
+
 from datasets.image_pipeline import ImagePreprocessingPipeline, ImageDecodePreprocessingPipeline, RandomResize
 from datasets.datasets import DatasetsManager
 from datasets.pipeline import (
@@ -59,6 +61,8 @@ class IconclassDataloader:
         else:
             dict_args = kwargs
 
+        self.use_center_crop = dict_args.get("use_center_crop", False)
+
         self.train_path = dict_args.get("train_path", None)
         self.train_annotation_path = dict_args.get("train_annotation_path", None)
 
@@ -100,18 +104,26 @@ class IconclassDataloader:
             self.test_annotation.update(read_jsonl(self.test_annotation_path, dict_key="id"))
 
     def train_image_pipeline(self):
-        transforms = torchvision.transforms.Compose(
-            [
-                torchvision.transforms.ToPILImage(),
-                torchvision.transforms.RandomHorizontalFlip(),
-                torchvision.transforms.RandomRotation(10),
-                RandomResize(self.train_random_sizes, max_size=self.max_size),
-                # torchvision.transforms.RandomResizedCrop(size=224, scale=(0.5, 1.0)), #RandAugment CatOut
-                torchvision.transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.1),
-                torchvision.transforms.ToTensor(),
-                torchvision.transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+        print(self.train_random_sizes)
+        pipeline = [
+            torchvision.transforms.ToPILImage(),
+            torchvision.transforms.RandomHorizontalFlip(),
+            torchvision.transforms.RandomRotation(10),
+            RandomResize(self.train_random_sizes, max_size=self.max_size),
+        ]
+        if self.use_center_crop:
+            pipeline += [
+                torchvision.transforms.Resize(self.train_random_sizes[0], interpolation=Image.BICUBIC),
+                torchvision.transforms.CenterCrop(self.train_random_sizes[0]),
             ]
-        )
+
+        pipeline += [
+            # torchvision.transforms.RandomResizedCrop(size=224, scale=(0.5, 1.0)), #RandAugment CatOut
+            torchvision.transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.1),
+            torchvision.transforms.ToTensor(),
+            torchvision.transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+        ]
+        transforms = torchvision.transforms.Compose(pipeline)
         return ImagePreprocessingPipeline(
             transforms, min_size=self.train_filter_min_dim, sample_additional=self.train_sample_additional
         )
@@ -137,20 +149,28 @@ class IconclassDataloader:
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             drop_last=True,
-            collate_fn=PadCollate(pad_values={"image": 0.0, "image_mask": False, "parents":"#PAD"}),
+            collate_fn=PadCollate(pad_values={"image": 0.0, "image_mask": False, "parents": "#PAD"}),
         )
         return dataloader
 
     def val_image_pipeline(self):
-        transforms = torchvision.transforms.Compose(
-            [
-                torchvision.transforms.ToPILImage(),
-                RandomResize([self.val_size], max_size=self.max_size),
-                torchvision.transforms.ToTensor(),
-                torchvision.transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+        pipeline = [torchvision.transforms.ToPILImage(), RandomResize([self.val_size], max_size=self.max_size)]
+
+        if self.use_center_crop:
+            pipeline += [
+                torchvision.transforms.Resize(self.val_size, interpolation=Image.BICUBIC),
+                torchvision.transforms.CenterCrop(self.val_size),
             ]
+
+        pipeline += [
+            torchvision.transforms.ToTensor(),
+            torchvision.transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+        ]
+        transforms = torchvision.transforms.Compose(pipeline)
+        return ImagePreprocessingPipeline(
+            transforms,
+            min_size=self.val_filter_min_dim,
         )
-        return ImagePreprocessingPipeline(transforms, min_size=self.val_filter_min_dim,)
 
     def val_decode_pieline(self):
         return SequencePipeline(
@@ -171,7 +191,7 @@ class IconclassDataloader:
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             drop_last=True,
-            collate_fn=PadCollate(pad_values={"image": 0.0, "image_mask": False, "parents":"#PAD"}),
+            collate_fn=PadCollate(pad_values={"image": 0.0, "image_mask": False, "parents": "#PAD"}),
         )
         return dataloader
 
@@ -184,7 +204,10 @@ class IconclassDataloader:
                 torchvision.transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
             ]
         )
-        return ImagePreprocessingPipeline(transforms, min_size=self.val_filter_min_dim,)
+        return ImagePreprocessingPipeline(
+            transforms,
+            min_size=self.val_filter_min_dim,
+        )
 
     def test_decode_pieline(self):
         return SequencePipeline(
@@ -238,6 +261,8 @@ class IconclassDataloader:
     @classmethod
     def add_args(cls, parent_parser):
         parser = argparse.ArgumentParser(parents=[parent_parser], add_help=False)
+
+        parser.add_argument("--use_center_crop", action="store_true", help="verbose output")
 
         parser.add_argument("--train_path", nargs="+", type=str)
         parser.add_argument("--train_annotation_path", nargs="+", type=str)

@@ -90,7 +90,7 @@ class ConvnetAttnLstm(BaseModel):
 
         self.vocabulary_size = [len(x["tokenizer"]) for x in self.classifier_config]  # get from tockenizer
         self.max_vocab_size = max(self.vocabulary_size)
-        self.embedding_dim = 512#256
+        self.embedding_dim = 768#256
         self.attention_dim = 128
         # self.max_vocab_size = max(self.vocabulary_size)
         # self.encoder = Encoder(args, embedding_dim=self.embedding_dim, flatten_embedding=True)
@@ -198,7 +198,7 @@ class ConvnetAttnLstm(BaseModel):
         # image = F.interpolate(image, size = (299,299), mode= 'bicubic', align_corners=False)
         # forward image
         image_embedding = self.encoder(image)
-
+        print(image_embedding[0].shape)
         if len(image_embedding[0].shape) ==2:
             image_embedding = [torch.unsqueeze(image_embedding[0], 1)]
 

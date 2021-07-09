@@ -213,7 +213,7 @@ class Transformer(nn.Module):
 
 
 class VisualTransformer(nn.Module):
-    def __init__(self, input_resolution: int, patch_size: int, width: int, layers: int, heads: int, output_dim: int):
+    def __init__(self, input_resolution: int, patch_size: int, width: int, layers: int, heads: int, output_dim: int, attention_flag: bool):
         super().__init__()
         self.input_resolution = input_resolution
         self.output_dim = output_dim
@@ -228,6 +228,7 @@ class VisualTransformer(nn.Module):
 
         self.ln_post = LayerNorm(width)
         self.proj = nn.Parameter(scale * torch.randn(width, output_dim))
+        self.attention_flag = attention_flag
 
     def forward(self, x: torch.Tensor):
         # print(x.shape)
@@ -253,7 +254,7 @@ class VisualTransformer(nn.Module):
         x = self.transformer(x)
         x = x.permute(1, 0, 2)  # LND -> NLD
         
-        if self.attntion_flag is not None:
+        if self.attention_flag is not None:
             return self.ln_post(x)
         
         x = self.ln_post(x[:, 0, :])

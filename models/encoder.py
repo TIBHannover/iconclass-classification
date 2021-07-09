@@ -80,6 +80,7 @@ class Encoder(nn.Module):
         self.encoder_finetune = dict_args.get("encoder_finetune", None)
 
         self.layers_returned = dict_args.get("layers_returned", ["layer4"])
+        self.use_clip_attention = dict_args.get("using_clip_attention", False)
 
         norm_layer = None
         if self.use_frozen_batch_norm:
@@ -120,6 +121,7 @@ class Encoder(nn.Module):
                 layers=vision_layers,
                 heads=vision_heads,
                 output_dim=embed_dim,
+                attention_flag = self.use_clip_attention
             )
             self.dim = [512]
             self.layers_returned = None
@@ -222,7 +224,8 @@ class Encoder(nn.Module):
         )
 
         parser.add_argument("--clip_vit_path", type=str)
-
+        parser.add_argument("--using_clip_attention", action="store_true", default=False)
+        
         parser.add_argument("--byol_embedding_path", type=str)
         parser.add_argument("--use_frozen_batch_norm", action="store_true")
         parser.add_argument("--layers_returned", nargs="+", default=["layer4"])

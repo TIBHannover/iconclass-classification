@@ -90,10 +90,11 @@ class ConvnetAttnLstm(BaseModel):
 
         self.vocabulary_size = [len(x["tokenizer"]) for x in self.classifier_config]  # get from tockenizer
         self.max_vocab_size = max(self.vocabulary_size)
-        self.embedding_dim = 256
+        self.embedding_dim = 512#256
         self.attention_dim = 128
         # self.max_vocab_size = max(self.vocabulary_size)
-        self.encoder = Encoder(args, embedding_dim=self.embedding_dim, flatten_embedding=True)
+        # self.encoder = Encoder(args, embedding_dim=self.embedding_dim, flatten_embedding=True)
+        self.encoder = Encoder(args, embedding_dim=None,flatten_embedding=False )
         self.decoder = Decoder(
             self.vocabulary_size, self.embedding_dim, self.attention_dim, self.embedding_dim, self.max_vocab_size
         )
@@ -132,6 +133,8 @@ class ConvnetAttnLstm(BaseModel):
         # image = F.interpolate(image, size = (299,299), mode= 'bicubic', align_corners=False)
         # forward image
         image_embedding = self.encoder(image)
+        if len(image_embedding[0].shape) ==2:
+            image_embedding = [torch.unsqueeze(image_embedding[0], 1)]
 
         image_embedding = torch.cat(image_embedding, dim=1)
 
@@ -195,6 +198,10 @@ class ConvnetAttnLstm(BaseModel):
         # image = F.interpolate(image, size = (299,299), mode= 'bicubic', align_corners=False)
         # forward image
         image_embedding = self.encoder(image)
+
+        if len(image_embedding[0].shape) ==2:
+            image_embedding = [torch.unsqueeze(image_embedding[0], 1)]
+
 
         image_embedding = torch.cat(image_embedding, dim=1)
 

@@ -230,12 +230,12 @@ class VisualTransformer(nn.Module):
         self.proj = nn.Parameter(scale * torch.randn(width, output_dim))
 
     def forward(self, x: torch.Tensor):
-        print(x.shape)
+        # print(x.shape)
         x = self.conv1(x)  # shape = [*, width, grid, grid]
-        print(x.shape)
+        # print(x.shape)
         x = x.reshape(x.shape[0], x.shape[1], -1)  # shape = [*, width, grid ** 2]
         x = x.permute(0, 2, 1)  # shape = [*, grid ** 2, width]
-        print(x.shape)
+        # print(x.shape)
         x = torch.cat(
             [
                 self.class_embedding.to(x.dtype)
@@ -244,15 +244,18 @@ class VisualTransformer(nn.Module):
             ],
             dim=1,
         )  # shape = [*, grid ** 2 + 1, width]
-        print(x.shape)
+        # print(x.shape)
         x = x + self.positional_embedding.to(x.dtype)
-        print(x.shape)
+        # print(x.shape)
         x = self.ln_pre(x)
 
         x = x.permute(1, 0, 2)  # NLD -> LND
         x = self.transformer(x)
         x = x.permute(1, 0, 2)  # LND -> NLD
-
+        
+        if self.attntion_flag is not None:
+            return self.ln_post(x)
+        
         x = self.ln_post(x[:, 0, :])
 
         if self.proj is not None:

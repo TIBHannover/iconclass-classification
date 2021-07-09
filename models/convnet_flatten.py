@@ -14,6 +14,7 @@ from models.models import ModelsManager
 
 from models.resnet import ResNet50
 from models.base_model import BaseModel
+from models.loss import FocalBCEWithLogitsLoss
 
 from datasets.utils import read_jsonl
 
@@ -40,7 +41,11 @@ class ConvnetFlatten(BaseModel):
 
         self.using_weights = dict_args.get("using_weights", False)
         self.filter_label_by_count = dict_args.get("filter_label_by_count", None)
-
+        
+        self.use_focal_loss = dict_args.get("use_focal_loss", None)
+        self.focal_loss_gamma = dict_args.get("focal_loss_gamma", None)
+        self.focal_loss_alpha = dict_args.get("focal_loss_alpha", None)
+        
         self.mapping_config = []
         if self.mapping_path is not None:
             mm = read_jsonl(self.mapping_path)
@@ -76,8 +81,13 @@ class ConvnetFlatten(BaseModel):
             for x in self.mapping_config:
                 self.weights[0, x["class_id"]] = x["weight"]
         self.weights = torch.tensor(self.weights)
-        self.loss = torch.nn.BCEWithLogitsLoss()
 
+        if self.use_focal_loss:
+            self.loss = FocalBCEWithLogitsLoss(
+                reduction="none", gamma=self.focal_loss_gamma, alpha=self.focal_loss_alpha
+            )
+        else:
+            self.loss = torch.nn.BCEWithLogitsLoss()
         # self.f1_val = pl.metrics.classification.F1(num_classes=len(self.mapping_config), multilabel=True, average=None)
 
         self.byol_embedding_path = dict_args.get("byol_embedding_path", None)
@@ -133,7 +143,7 @@ class ConvnetFlatten(BaseModel):
         self.all_predictions.append(pp)
         self.all_losses.append(ll)
 
-        return {"loss": loss}
+        return {"loss": torch.mean(loss)}
 
     # def validation_step_end(self, outputs):
     #     self.average_precision(outputs["pred"], outputs["target"])
@@ -150,7 +160,7 @@ class ConvnetFlatten(BaseModel):
         for output in outputs:
             loss += output["loss"]
             count += 1
-        
+        print(loss.shape)
         self.log("val/loss", loss / count, prog_bar=True)
         
         def binarize_prediction(probabilities, threshold: float, argsorted=None, min_labels=1, max_labels=10):
@@ -216,7 +226,11 @@ class ConvnetFlatten(BaseModel):
         parser.add_argument("--classifier_path", type=str)
         parser.add_argument("--using_weights", type=bool, default=False)
         parser.add_argument("--byol_embedding_path", type=str)
-
+        parser.add_argument("--filter_label_by_count", type=int, default=0)
+        
+        parser.add_argument("--use_focal_loss", action="store_true", default=False)
+        parser.add_argument("--focal_loss_gamma", type=float, default=2)
+        parser.add_argument("--focal_loss_alpha", type=float, default=0.25)
         return parser
 
     def load_pretrained_byol(self, path_checkpoint):

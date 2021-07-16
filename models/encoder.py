@@ -121,9 +121,11 @@ class Encoder(nn.Module):
                 layers=vision_layers,
                 heads=vision_heads,
                 output_dim=embed_dim,
-                attention_flag = self.use_clip_attention
+                attention_flag=self.use_clip_attention,
             )
             self.dim = [512]
+            if self.use_clip_attention:
+                self.dim = [768]
             self.layers_returned = None
 
         ##TODO fix later
@@ -225,7 +227,7 @@ class Encoder(nn.Module):
 
         parser.add_argument("--clip_vit_path", type=str)
         parser.add_argument("--using_clip_attention", action="store_true", default=False)
-        
+
         parser.add_argument("--byol_embedding_path", type=str)
         parser.add_argument("--use_frozen_batch_norm", action="store_true")
         parser.add_argument("--layers_returned", nargs="+", default=["layer4"])

@@ -198,7 +198,7 @@ class ConvnetAttnLstm(BaseModel):
         # image = F.interpolate(image, size = (299,299), mode= 'bicubic', align_corners=False)
         # forward image
         image_embedding = self.encoder(image)
-        print(image_embedding[0].shape)
+        # print(image_embedding[0].shape)
         if len(image_embedding[0].shape) ==2:
             image_embedding = [torch.unsqueeze(image_embedding[0], 1)]
 

@@ -7,19 +7,16 @@ import numpy as np
 import torch
 from torch.nn import functional as F
 from torch import nn
-import pytorch_lightning as pl
-from pytorch_lightning.core.lightning import LightningModule
-from torchvision.models import resnet50, resnet152, densenet161
-from models.models import ModelsManager
 
-from models.resnet import ResNet50
+from models.models import ModelsManager
+from models.encoder import Encoder
 from models.base_model import BaseModel
 from models.loss import FocalBCEWithLogitsLoss
 
 from datasets.utils import read_jsonl
 
-from models.utils import linear_rampup, cosine_rampdown
 from sklearn.metrics import fbeta_score
+
 
 @ModelsManager.export("convnet_flatten")
 class ConvnetFlatten(BaseModel):
@@ -41,38 +38,29 @@ class ConvnetFlatten(BaseModel):
 
         self.using_weights = dict_args.get("using_weights", False)
         self.filter_label_by_count = dict_args.get("filter_label_by_count", None)
-        
+
         self.use_focal_loss = dict_args.get("use_focal_loss", None)
         self.focal_loss_gamma = dict_args.get("focal_loss_gamma", None)
         self.focal_loss_alpha = dict_args.get("focal_loss_alpha", None)
-        
+
         self.mapping_config = []
         if self.mapping_path is not None:
             mm = read_jsonl(self.mapping_path)
             for x in mm:
-                if x['count'] >self.filter_label_by_count:
+                if x["count"] > self.filter_label_by_count:
                     self.mapping_config.append(x)
 
         self.classifier_config = []
         if self.classifier_path is not None:
             self.classifier_config = read_jsonl(self.classifier_path)
 
-        if self.encoder_model == "resnet152":
-            self.net = resnet152(pretrained=self.pretrained)
-            self.net = nn.Sequential(*list(self.net.children())[:-1])
-            self.dim = 2048
-        elif self.encoder_model == "densenet161":
-            self.net = densenet161(pretrained=self.pretrained)
-            self.net = nn.Sequential(*list(list(self.net.children())[0])[:-1])
-            self.dim = 1920
-        else:
-            self.net = resnet50(pretrained=self.pretrained)
-            self.net = nn.Sequential(*list(self.net.children())[:-1])
-            self.dim = 2048
+        self.encoder = Encoder(args, embedding_dim=None, flatten_embedding=False)
+        self.dim = self.encoder.dim[0]
+        print(f"Embedding dim: {self.dim}")
         self.dropout1 = torch.nn.Dropout(0.5)
-        self.fc = torch.nn.Linear(self.dim, 1024)
+        self.fc = torch.nn.Linear(self.dim, 512)
         self.dropout2 = torch.nn.Dropout(0.5)
-        self.classifier = torch.nn.Linear(1024, len(self.mapping_config))
+        self.classifier = torch.nn.Linear(512, len(self.mapping_config))
 
         self.weights = np.ones([1, len(self.mapping_config)])
         if self.using_weights:
@@ -88,16 +76,11 @@ class ConvnetFlatten(BaseModel):
             )
         else:
             self.loss = torch.nn.BCEWithLogitsLoss()
-        # self.f1_val = pl.metrics.classification.F1(num_classes=len(self.mapping_config), multilabel=True, average=None)
-
-        self.byol_embedding_path = dict_args.get("byol_embedding_path", None)
-
-        if self.byol_embedding_path is not None:
-            self.load_pretrained_byol(self.byol_embedding_path)
 
     def forward(self, x):
-        x = self.net(x)
-        x = torch.flatten(x, 1)
+        x = self.encoder(x)
+
+        x = torch.flatten(x[0], 1)
         x = self.dropout1(x)
         x = self.fc(x)
         x = self.dropout2(x)
@@ -116,15 +99,12 @@ class ConvnetFlatten(BaseModel):
         self.weights = self.weights.to(logits.device)
         loss = self.loss(logits, target) * self.weights
         return {"loss": loss}
-        # return {"loss": loss, "prediction": F.sigmoid(logits), "target": target}
 
     def training_step_end(self, outputs):
 
         self.log("train/loss", outputs["loss"].mean(), prog_bar=True)
         return {
             "loss": outputs["loss"].mean(),
-            # "progress_bar": {"train/loss": outputs["loss"].mean(),},
-            # "log": {"train/loss": outputs["loss"].mean(),},
         }
 
     def validation_step(self, batch, batch_idx):
@@ -145,9 +125,6 @@ class ConvnetFlatten(BaseModel):
 
         return {"loss": torch.mean(loss)}
 
-    # def validation_step_end(self, outputs):
-    #     self.average_precision(outputs["pred"], outputs["target"])
-    #     print(self.average_precision)
     def on_validation_epoch_start(self):
         self.all_predictions = []
         self.all_targets = []
@@ -162,7 +139,7 @@ class ConvnetFlatten(BaseModel):
             count += 1
         print(loss.shape)
         self.log("val/loss", loss / count, prog_bar=True)
-        
+
         def binarize_prediction(probabilities, threshold: float, argsorted=None, min_labels=1, max_labels=10):
             """Return matrix of 0/1 predictions, same shape as probabilities."""
             # assert probabilities.shape[1] == self.num_classes
@@ -203,7 +180,6 @@ class ConvnetFlatten(BaseModel):
         for kk, vv in sorted(metrics.items(), key=lambda kv: -kv[1]):
             self.log(kk, np.nanmean(round(vv, 3)), prog_bar=True)
 
-
         # f1_score = self.f1_val.compute().cpu().detach()
 
         # self.log("val/f1", np.nanmean(f1_score), prog_bar=True)
@@ -215,31 +191,17 @@ class ConvnetFlatten(BaseModel):
     @classmethod
     def add_args(cls, parent_parser):
         parent_parser = super().add_args(parent_parser)
+        parent_parser = Encoder.add_args(parent_parser)
         parser = argparse.ArgumentParser(parents=[parent_parser], add_help=False, conflict_handler="resolve")
-        # args, _ = parser.parse_known_args()
-        # if "classifier_path" not in args:
-        parser.add_argument("--pretrained", type=bool, default=True)
-        parser.add_argument(
-            "--encoder_model", choices=("resnet152", "densenet161", "resnet50", "inceptionv3"), default="resnet50"
-        )
+
         parser.add_argument("--mapping_path", type=str)
         parser.add_argument("--classifier_path", type=str)
+
         parser.add_argument("--using_weights", type=bool, default=False)
-        parser.add_argument("--byol_embedding_path", type=str)
+
         parser.add_argument("--filter_label_by_count", type=int, default=0)
-        
+
         parser.add_argument("--use_focal_loss", action="store_true", default=False)
         parser.add_argument("--focal_loss_gamma", type=float, default=2)
         parser.add_argument("--focal_loss_alpha", type=float, default=0.25)
         return parser
-
-    def load_pretrained_byol(self, path_checkpoint):
-        assert self.encoder_model == "resnet50", "BYOL currently working with renset50"
-        data = torch.load(path_checkpoint)["state_dict"]
-
-        load_dict = {}
-        for name, var in data.items():
-            if "model.target_net.0._features" in name:
-                new_name = re.sub("^model.target_net.0._features.", "", name)
-                load_dict[new_name] = var
-        self.net.load_state_dict(load_dict)

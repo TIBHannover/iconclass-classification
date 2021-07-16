@@ -213,7 +213,16 @@ class Transformer(nn.Module):
 
 
 class VisualTransformer(nn.Module):
-    def __init__(self, input_resolution: int, patch_size: int, width: int, layers: int, heads: int, output_dim: int, attention_flag: bool):
+    def __init__(
+        self,
+        input_resolution: int,
+        patch_size: int,
+        width: int,
+        layers: int,
+        heads: int,
+        output_dim: int,
+        attention_flag: bool = None,
+    ):
         super().__init__()
         self.input_resolution = input_resolution
         self.output_dim = output_dim
@@ -253,10 +262,10 @@ class VisualTransformer(nn.Module):
         x = x.permute(1, 0, 2)  # NLD -> LND
         x = self.transformer(x)
         x = x.permute(1, 0, 2)  # LND -> NLD
-        
-        if self.attention_flag is not None:
+        # print(f"attention_flag {self.attention_flag}")
+        if self.attention_flag:
             return self.ln_post(x)
-        
+
         x = self.ln_post(x[:, 0, :])
 
         if self.proj is not None:

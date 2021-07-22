@@ -1,3 +1,11 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Thu Jul 22 12:53:27 2021
+
+@author: javad
+"""
+
 import re
 import argparse
 import logging
@@ -28,7 +36,7 @@ from sklearn.metrics import fbeta_score
 import pandas as pd
 import pickle
 
-@ModelsManager.export("convnet_attn_lstm")
+@ModelsManager.export("convnet_attn_lstm_hierarchical")
 class ConvnetAttnLstm(BaseModel):
     def __init__(self, args=None, **kwargs):
         super(ConvnetAttnLstm, self).__init__(args, **kwargs)
@@ -156,16 +164,13 @@ class ConvnetAttnLstm(BaseModel):
 
         loss = 0
         # predictions_list = []
-        parents_lvl = [None] * image.shape[0]
-        flat_prediction = torch.zeros(image.shape[0], len(self.mapping_config), dtype=image_embedding.dtype).to(
-            image.device.index
-        )
-        flat_target = torch.zeros(image.shape[0], len(self.mapping_config), dtype=target[0].dtype).to(
-            image.device.index
-        )
-        flat_weighting = torch.zeros(image.shape[0], len(self.mapping_config), dtype=image_embedding.dtype).to(
-            image.device.index
-        )
+        # parents_lvl = [None] * image.shape[0]
+        # flat_prediction = torch.zeros(image.shape[0], len(self.mapping_config), dtype=image_embedding.dtype).to(
+        #     image.device.index
+        # )
+        # flat_target = torch.zeros(image.shape[0], len(self.mapping_config), dtype=target[0].dtype).to(
+        #     image.device.index
+        # )
         for i_lev in range(len(target)):
             predictions, hidden, _ = self.decoder(decoder_inp, image_embedding, hidden, i_lev)
             # print(f"Pre: {torch.min(predictions)} {torch.max(predictions)} {torch.mean(predictions)}")
@@ -174,35 +179,29 @@ class ConvnetAttnLstm(BaseModel):
             # )
             # predictions_list.append(torch.sigmoid(predictions))
 
-            source_indexes, target_indexes = self.map_level_prediction(parents_lvl)
-            parents_lvl = [x[i_lev] for x in parents]
-            flat_prediction[target_indexes] = torch.sigmoid(predictions)[source_indexes]
-            flat_target[target_indexes] = target[i_lev][source_indexes]
-            flat_weighting[target_indexes] = torch.ones_like(target[i_lev][source_indexes], dtype=image_embedding.dtype)
-            # loss += torch.mean(self.loss(predictions, target[i_lev]))
+            # source_indexes, target_indexes = self.map_level_prediction(parents_lvl)
+            # parents_lvl = [x[i_lev] for x in parents]
+            # flat_prediction[target_indexes] = torch.sigmoid(predictions)[source_indexes]
+            # flat_target[target_indexes] = target[i_lev][source_indexes]
+
+            loss += torch.mean(self.loss(predictions, target[i_lev]))
             decoder_inp = source[i_lev]
             # decoder_inp = torch.tensor(target[i_lev]).to(torch.int64).to(image.device.index)
-        print('*************************')
-        print(torch.mean(flat_weighting))
-        print('*************************')
         
 
-        if self.use_label_smoothing:
-            targets_smooth = flat_target.float() * (1 - self.LABEL_SMOOTHING_factor) + 0.5 * self.LABEL_SMOOTHING_factor
-        else:
-            targets_smooth = flat_target
-        lloss = self.loss(flat_prediction, targets_smooth)*torch.Tensor(self.mask_vec).to(image.device.index)
-        lloss *= flat_weighting
-        # total_loss = loss / len(target)
-        # with open('pickletest.pkl', 'wb') as f:
-        #     pickle.dump([flat_prediction.detach().cpu().numpy(),targets_smooth.detach().cpu().numpy(),lloss.detach().cpu().numpy() ], f)
-        
+        # if self.use_label_smoothing:
+        #     targets_smooth = flat_target.float() * (1 - self.LABEL_SMOOTHING_factor) + 0.5 * self.LABEL_SMOOTHING_factor
+        # else:
+        #     targets_smooth = flat_target
+        # lloss = self.loss(flat_prediction, targets_smooth)*torch.Tensor(self.mask_vec).to(image.device.index)
+        lloss= loss / len(target)
         return {"loss": lloss}
+
 
     def training_step_end(self, outputs):
 
-        ll = torch.mean(outputs["loss"])*(outputs["loss"].shape[1])/(
-            self.num_of_labels.to(outputs["loss"].device.index))
+        # ll = torch.mean(outputs["loss"])*(outputs["loss"].shape[1])/(
+        #     self.num_of_labels.to(outputs["loss"].device.index))
         ll = torch.mean(outputs["loss"])
         self.log("train/loss",ll , prog_bar=True)
         # if (self.global_step % self.trainer.log_every_n_steps) == 0:
@@ -263,7 +262,7 @@ class ConvnetAttnLstm(BaseModel):
             parents_lvl = [None] * image.shape[0]
             for i_lev in range(len(target)):
                 predictions, hidden, _ = self.decoder(decoder_inp, image_embedding, hidden, i_lev)
-                # loss += torch.mean(self.loss(predictions, target[i_lev]))
+                loss += torch.mean(self.loss(predictions, target[i_lev]))
                 decoder_inp = source[i_lev]
 
                 source_indexes, target_indexes = self.map_level_prediction(parents_lvl)
@@ -281,23 +280,25 @@ class ConvnetAttnLstm(BaseModel):
                 # parents_lvl = parents[i_lev]
                 parents_lvl = [x[i_lev] for x in parents]
 
-            # total_loss = loss / len(target)
-
-            total_loss = torch.mean(self.loss(flat_prediction, flat_target) *
-                                   torch.Tensor(self.mask_vec).to(image.device.index)
-                                    )*flat_target.shape[1]/self.num_of_labels.to(image.device.index)
+            total_loss_h = loss / len(target)
+            temp_loss = self.loss(flat_prediction, flat_target)
+            total_loss = torch.mean(self.loss(flat_prediction, flat_target))# *
+                                   #torch.Tensor(self.mask_vec).to(image.device.index)
+                                    #)*flat_target.shape[1]/self.num_of_labels.to(image.device.index)
 
             tt = flat_target.detach().cpu().numpy()
             pp = flat_prediction.detach().cpu().numpy()
             # pp = flat_prediction_norm.detach().cpu().numpy()
             ll = total_loss.detach().cpu().numpy()
-
+            with open('pickletest.pkl', 'wb') as f:
+                pickle.dump([flat_prediction.detach().cpu().numpy(),flat_target.detach().cpu().numpy(),temp_loss.detach().cpu().numpy() ], f)
+            
             self.all_targets.append(tt)
             self.all_predictions.append(pp)
             self.all_losses.append(ll)
 
         return {
-            "loss": total_loss,
+            "loss": total_loss, "loss_h":total_loss_h
         }
 
     def map_level_prediction(self, parents):
@@ -336,11 +337,12 @@ class ConvnetAttnLstm(BaseModel):
         self.log("val/number_of_labels", torch.sum(mask), prog_bar=True)  # TODO False
 
         loss = 0.0
+        loss_h = 0.0
         count = 0
         for output in outputs:
             loss += output["loss"]
             count += 1
-
+            loss_h+=output["loss_h"]
         # # f1score prediction
         # f1_score = self.f1_val.compute().cpu().detach()
         # self.log("val/f1", np.nanmean(f1_score), prog_bar=True)
@@ -370,6 +372,7 @@ class ConvnetAttnLstm(BaseModel):
         #     self.log(f"val/f1_norm_{depth}", np.nanmean(torch.stack(x, dim=0)), prog_bar=False)
 
         self.log("val/loss", loss / count, prog_bar=True)
+        self.log("val/loss_h", loss_h / count, prog_bar=True)
 
         def binarize_prediction(probabilities, threshold: float, argsorted=None, min_labels=1, max_labels=10):
             """Return matrix of 0/1 predictions, same shape as probabilities."""

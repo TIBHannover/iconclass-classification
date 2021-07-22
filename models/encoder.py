@@ -127,19 +127,19 @@ class Encoder(nn.Module):
             self.layers_returned = None
 
         ##TODO fix later
-        # if self.encoder_finetune is not None:
-        #     if len(self.encoder_finetune) > 0:
+        if self.encoder_finetune is not None:
+            if len(self.encoder_finetune) > 0:
 
-        #         for name, parameter in self.net.named_parameters():
-        #             finetune_layer = False
-        #             for x in self.encoder_finetune:
-        #                 if x in name:
-        #                     finetune_layer = True
-        #             if not finetune_layer:
-        #                 parameter.requires_grad_(False)
-        # else:
-        #     for name, parameter in self.net.named_parameters():
-        #         parameter.requires_grad_(False)
+                for name, parameter in self.net.named_parameters():
+                    finetune_layer = False
+                    for x in self.encoder_finetune:
+                        if x in name:
+                            finetune_layer = True
+                    if not finetune_layer:
+                        parameter.requires_grad_(False)
+        else:
+            for name, parameter in self.net.named_parameters():
+                parameter.requires_grad_(False)
 
         # for name, parameter in self.net.named_parameters():
         #     print(f"{name}:::::{parameter.shape}")

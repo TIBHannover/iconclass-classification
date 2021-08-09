@@ -10,7 +10,7 @@ from typing import Dict, List
 
 from torchvision.models import resnet50, resnet152, densenet161, inception_v3
 
-from models.clip import VisualTransformer
+from encoders.encoders import EncodersManager
 
 
 class FrozenBatchNorm2d(torch.nn.Module):
@@ -52,7 +52,8 @@ class FrozenBatchNorm2d(torch.nn.Module):
         return x * scale + bias
 
 
-class Encoder(nn.Module):
+@EncodersManager.export("resnet")
+class ResnetEncoder(nn.Module):
     def __init__(
         self,
         args=None,
@@ -62,7 +63,7 @@ class Encoder(nn.Module):
         average_pooling=None,
         **kwargs
     ):
-        super(Encoder, self).__init__()
+        super(ResnetEncoder, self).__init__()
         if args is not None:
             dict_args = vars(args)
             dict_args.update(kwargs)
@@ -72,61 +73,26 @@ class Encoder(nn.Module):
         self.embedding_dim = embedding_dim
         self.returned_layers = returned_layers
 
-        self.encoder_model = dict_args.get("encoder_model", None)
         self.pretrained = dict_args.get("pretrained", None)
         self.byol_embedding_path = dict_args.get("byol_embedding_path", None)
-        self.clip_vit_path = dict_args.get("clip_vit_path", None)
         self.use_frozen_batch_norm = dict_args.get("use_frozen_batch_norm", None)
         self.encoder_finetune = dict_args.get("encoder_finetune", None)
 
         self.layers_returned = dict_args.get("layers_returned", ["layer4"])
-        self.use_clip_attention = dict_args.get("using_clip_attention", False)
+        self.resnet_depth = dict_args.get("resnet_depth", "50")
 
         norm_layer = None
         if self.use_frozen_batch_norm:
             norm_layer = FrozenBatchNorm2d
 
-        if self.encoder_model == "resnet152":
+        if int(self.resnet_depth) == 152:
             self.net = resnet152(pretrained=self.pretrained, progress=False, norm_layer=norm_layer)
-            # self.net = nn.Sequential(*list(self.net.children())[:-2])
             self.dim_3 = 1024
             self.dim_4 = 2048
-        elif self.encoder_model == "densenet161":
-            self.net = densenet161(pretrained=self.pretrained, progress=False, norm_layer=norm_layer)
-            # self.net = nn.Sequential(*list(list(self.net.children())[0])[:-2])
-            self.dim_4 = 1920
-        elif self.encoder_model == "resnet50":
+        elif int(self.resnet_depth) == 50:
             self.net = resnet50(pretrained=self.pretrained, progress=False, norm_layer=norm_layer)
-            # self.net = nn.Sequential(*list(self.net.children())[:-2])
             self.dim_3 = 1024
             self.dim_4 = 2048
-        elif self.encoder_model == "inceptionv3":  # TODO:: fix the input dimension of images
-            self.net = inception_v3(pretrained=self.pretrained, progress=False, norm_layer=norm_layer)
-            # self.net = nn.Sequential(*list(self.net.children())[:-2])
-            self.dim_4 = 2048
-
-        elif self.encoder_model == "vit":
-            vision_width = 768
-            vision_layers = 12
-            vision_patch_size = 32
-            grid_size = 7
-            image_resolution = 224
-            embed_dim = 512
-
-            vision_heads = vision_width // 64
-            self.net = VisualTransformer(
-                input_resolution=image_resolution,
-                patch_size=vision_patch_size,
-                width=vision_width,
-                layers=vision_layers,
-                heads=vision_heads,
-                output_dim=embed_dim,
-                attention_flag=self.use_clip_attention,
-            )
-            self.dim = [512]
-            if self.use_clip_attention:
-                self.dim = [768]
-            self.layers_returned = None
 
         ##TODO fix later
         if self.encoder_finetune is not None:
@@ -166,23 +132,23 @@ class Encoder(nn.Module):
                         embedding_layers.append(torch.nn.Conv2d(self.dim_4, self.embedding_dim, kernel_size=[1, 1]))
                     elif x == "layer3":
                         embedding_layers.append(torch.nn.Conv2d(self.dim_3, self.embedding_dim, kernel_size=[1, 1]))
-                    else:
-                        pass
-                        # logging.warrning('')
 
-                self.feature_emb = torch.nn.ModuleList(embedding_layers)
+                # several outputs
+                if len(embedding_layers) > 0:
+                    self.feature_emb = torch.nn.ModuleList(embedding_layers)
+                else:
+                    self.feature_emb = torch.nn.ModuleList(
+                        [torch.nn.Conv2d(self.dim_4, self.embedding_dim, kernel_size=[1, 1])]
+                    )
         else:
             if self.embedding_dim is not None:
                 self.feature_emb = torch.nn.ModuleList(
-                    torch.nn.Conv2d(self.dim[0], self.embedding_dim, kernel_size=[1, 1])
+                    [torch.nn.Conv2d(self.dim[0], self.embedding_dim, kernel_size=[1, 1])]
                 )
                 self.dim[0] = self.embedding_dim
 
         if self.byol_embedding_path is not None:
             self.load_pretrained_byol(self.byol_embedding_path)
-
-        if self.clip_vit_path is not None:
-            self.load_pretrained_clip_vit(self.clip_vit_path)
 
         self.average_pooling = average_pooling
         if self.average_pooling:
@@ -201,7 +167,7 @@ class Encoder(nn.Module):
             x = [self.net(x)]
 
             if self.embedding_dim is not None:
-                x = [self.feature_emb[i](x[0])]
+                x = [self.feature_emb[0](x[0])]
 
         if self.average_pooling:
             x = [self.avgpool(y) for y in x]
@@ -219,18 +185,11 @@ class Encoder(nn.Module):
         parser.add_argument("--pretrained", action="store_true")
         parser.add_argument("--encoder_finetune", nargs="*", default=None)
 
-        parser.add_argument(
-            "--encoder_model",
-            choices=("resnet152", "densenet161", "resnet50", "inceptionv3", "vit"),
-            default="resnet50",
-        )
-
-        parser.add_argument("--clip_vit_path", type=str)
-        parser.add_argument("--using_clip_attention", action="store_true", default=False)
-
         parser.add_argument("--byol_embedding_path", type=str)
         parser.add_argument("--use_frozen_batch_norm", action="store_true")
         parser.add_argument("--layers_returned", nargs="+", default=["layer4"])
+        parser.add_argument("--resnet_depth", choices=["50", "152"], default="50")
+
         return parser
 
     def load_pretrained_byol(self, path_checkpoint):
@@ -244,6 +203,3 @@ class Encoder(nn.Module):
                 load_dict[new_name] = var
         # TODO move this to the encoder
         self.net.load_state_dict(load_dict)
-
-    def load_pretrained_clip_vit(self, path_checkpoint):
-        self.net.load_state_dict(torch.load(path_checkpoint))

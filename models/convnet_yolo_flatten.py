@@ -15,7 +15,8 @@ from models.models import ModelsManager
 from datasets.utils import read_jsonl
 
 from models.base_model import BaseModel
-from models.encoder import Encoder
+
+# from models.encoder import Encoder
 
 
 from pytorch_lightning.core.decorators import auto_move_data
@@ -199,7 +200,9 @@ class ConvnetYoloFlatten(BaseModel):
         self.log("test/f1", np.nansum(f1_score) / np.nansum(mask), prog_bar=True)
 
         self.log(
-            f"test/num_concepts", np.nansum(mask), prog_bar=True,
+            f"test/num_concepts",
+            np.nansum(mask),
+            prog_bar=True,
         )
 
         level_results = {}
@@ -219,7 +222,9 @@ class ConvnetYoloFlatten(BaseModel):
             )
 
             self.log(
-                f"test/num_concepts_{depth}", np.nansum(np.concatenate(mask_results[depth], axis=0)), prog_bar=True,
+                f"test/num_concepts_{depth}",
+                np.nansum(np.concatenate(mask_results[depth], axis=0)),
+                prog_bar=True,
             )
 
     @auto_move_data
@@ -268,4 +273,3 @@ class ConvnetYoloFlatten(BaseModel):
                 new_name = re.sub("^model.target_net.0._features.", "", name)
                 load_dict[new_name] = var
         self.net.load_state_dict(load_dict)
-

@@ -9,7 +9,8 @@ from torch.nn import functional as F
 from torch import nn
 
 from models.models import ModelsManager
-from models.encoder import Encoder
+
+# from models.encoder import Encoder
 from models.base_model import BaseModel
 from models.loss import FocalBCEWithLogitsLoss
 
@@ -98,6 +99,10 @@ class ConvnetFlatten(BaseModel):
         logits = self(image)
         self.weights = self.weights.to(logits.device)
         loss = self.loss(logits, target) * self.weights
+
+        self.logger.experiment.add_histogram(f"train/logits", logits, self.global_step)
+        self.logger.experiment.add_histogram(f"train/target", target, self.global_step)
+
         return {"loss": loss}
 
     def training_step_end(self, outputs):
@@ -113,6 +118,9 @@ class ConvnetFlatten(BaseModel):
         logits = self(image)
 
         loss = self.loss(logits, target)
+
+        self.logger.experiment.add_histogram(f"val/logits", logits, self.global_step)
+        self.logger.experiment.add_histogram(f"val/target", target, self.global_step)
         # self.f1_val(torch.sigmoid(logits), target)
         tt = target.detach().cpu().numpy()
         # pp = flat_prediction.detach().cpu().numpy()

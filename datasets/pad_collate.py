@@ -3,7 +3,15 @@ import torch.nn.functional as F
 import numpy as np
 
 import re
-from torch._six import container_abcs, string_classes, int_classes
+
+try:
+    from torch._six import container_abcs, string_classes, int_classes
+except:
+    import collections.abc as container_abcs
+
+    int_classes = int
+    string_classes = str
+
 
 np_str_obj_array_pattern = re.compile(r"[SaUO]")
 

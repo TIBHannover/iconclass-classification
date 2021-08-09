@@ -205,7 +205,7 @@ class MsgPackDataset(Dataset):
 
         if self.shuffle:
             self.random_gen.shuffle(keys)
-            logging.info(f"Dataset on rank {rank}: {keys[:3]}")
+            # logging.info(f"Dataset on rank {rank}: {keys[:3]}")
 
         for key in keys:
             with open(key, "rb") as f:

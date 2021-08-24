@@ -183,9 +183,9 @@ class ConvnetAttnLstm(BaseModel):
             decoder_inp = source[i_lev]
             # decoder_inp = torch.tensor(target[i_lev]).to(torch.int64).to(image.device.index)
         print('*************************')
-        print(torch.mean(flat_weighting))
+        print(target[i_lev])
         print('*************************')
-        
+        exit()
 
         if self.use_label_smoothing:
             targets_smooth = flat_target.float() * (1 - self.LABEL_SMOOTHING_factor) + 0.5 * self.LABEL_SMOOTHING_factor

@@ -36,6 +36,7 @@ class IconclassFlattenDecoderPipeline(Pipeline):
     def call(self, datasets=None, **kwargs):
         def decode(sample):
             y_onehot_0 = torch.zeros(len(self.mapping))
+
             for x in sample["classes"]:
                 if x in self.mapping:
                     y_onehot_0.scatter_(0, torch.tensor(self.mapping_list.index(x)), 1)

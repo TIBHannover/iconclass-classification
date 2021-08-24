@@ -165,7 +165,7 @@ class Encoder(nn.Module):
                     if x == "layer4":
                         embedding_layers.append(torch.nn.Conv2d(self.dim_4, self.embedding_dim, kernel_size=[1, 1]))
                     elif x == "layer3":
-                        embedding_layers.append(torch.nn.Conv2d(self.dim_3, self.embedding_dim, kernel_size=[1, 1]))
+                        embedding_layers.update(torch.nn.Conv2d(self.dim_3, self.embedding_dim, kernel_size=[1, 1]))
                     else:
                         pass
                         # logging.warrning('')

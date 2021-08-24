@@ -32,7 +32,9 @@ class BaseModel(LightningModule):
 
         self.gamma = dict_args.get("gamma", None)
         self.step_size = dict_args.get("step_size", None)
-
+        
+        self.finetune_hierarchy_level = dict_args.get("finetune_hierarchy_level", None)
+        
         print(dict_args)
 
     @classmethod
@@ -53,7 +55,9 @@ class BaseModel(LightningModule):
 
         parser.add_argument("--gamma", default=0.5, type=float)
         parser.add_argument("--step_size", default=10000, type=int)
-
+        
+        parser.add_argument("--finetune_hierarchy_level", type=int)
+        
         return parser
 
     def configure_optimizers(self):
@@ -63,6 +67,13 @@ class BaseModel(LightningModule):
                 "(bn|gn)(\d+)?.(weight|bias)": dict(weight_decay=0.0, lars_exclude=True),
                 "bias": dict(weight_decay=0.0, lars_exclude=True),
             }
+            
+            if self.finetune_hierarchy_level is not None:
+                for name, param in model.named_parameters():
+                    # print(name)
+                    if not re.search(f'(decoder.[^.]+)\.({self.finetune_hierarchy_level})\.(.)*', name):
+                        param.requires_grad = False
+            
             if parameterwise is None:
                 params = model.parameters()
 
@@ -81,6 +92,7 @@ class BaseModel(LightningModule):
 
                     # otherwise use the global settings
                     params.append(param_group)
+    
             if type.lower() == "sgd":
                 return torch.optim.SGD(params=params, **kwargs)
 

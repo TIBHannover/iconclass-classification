@@ -106,16 +106,25 @@ class ConvnetAttnLstm(BaseModel):
 
         self.vocabulary_size = [len(x["tokenizer"]) for x in self.classifier_config]  # get from tockenizer
         self.max_vocab_size = max(self.vocabulary_size)
-        # self.embedding_dim = 768#256
+        self.embedding_dim = 768#256
         self.attention_dim = 128
-        self.embedding_dim = 256
+        # self.embedding_dim = 256
         # self.max_vocab_size = max(self.vocabulary_size)
-        self.encoder = Encoder(args, embedding_dim=self.embedding_dim, flatten_embedding=True)
-        # self.encoder = Encoder(args, embedding_dim=None,flatten_embedding=False )
+        # self.encoder = Encoder(args, embedding_dim=self.embedding_dim, flatten_embedding=True)
+        self.encoder = Encoder(args, embedding_dim=None,flatten_embedding=False )
         self.decoder = Decoder(
             self.vocabulary_size, self.embedding_dim, self.attention_dim, self.embedding_dim, self.max_vocab_size
         )
-
+        
+        # for name, parameter in self.encoder.named_parameters():
+        #     print(f"{name}:::::{parameter.shape}")
+        if self.finetune_hierarchy_level is None:
+            self.levels = [i for i in range(self.max_level)]
+        else:
+            self.levels=[self.finetune_hierarchy_level]
+        # for name, parameter in self.decoder.named_parameters():
+        #     print(f"{name}:::::{parameter.shape}")
+        
         if self.using_weights:
             logging.info("Using weighting for loss")
 
@@ -171,7 +180,7 @@ class ConvnetAttnLstm(BaseModel):
         # flat_target = torch.zeros(image.shape[0], len(self.mapping_config), dtype=target[0].dtype).to(
         #     image.device.index
         # )
-        for i_lev in range(len(target)):
+        for i_lev in self.levels:
             predictions, hidden, _ = self.decoder(decoder_inp, image_embedding, hidden, i_lev)
             # print(f"Pre: {torch.min(predictions)} {torch.max(predictions)} {torch.mean(predictions)}")
             # print(
@@ -194,7 +203,7 @@ class ConvnetAttnLstm(BaseModel):
         # else:
         #     targets_smooth = flat_target
         # lloss = self.loss(flat_prediction, targets_smooth)*torch.Tensor(self.mask_vec).to(image.device.index)
-        lloss= loss / len(target)
+        lloss= loss / len(self.levels)
         return {"loss": lloss}
 
 
@@ -260,7 +269,7 @@ class ConvnetAttnLstm(BaseModel):
                 image.device.index
             )
             parents_lvl = [None] * image.shape[0]
-            for i_lev in range(len(target)):
+            for i_lev in self.levels:
                 predictions, hidden, _ = self.decoder(decoder_inp, image_embedding, hidden, i_lev)
                 loss += torch.mean(self.loss(predictions, target[i_lev]))
                 decoder_inp = source[i_lev]
@@ -280,7 +289,7 @@ class ConvnetAttnLstm(BaseModel):
                 # parents_lvl = parents[i_lev]
                 parents_lvl = [x[i_lev] for x in parents]
 
-            total_loss_h = loss / len(target)
+            total_loss_h = loss / len(self.levels)
             temp_loss = self.loss(flat_prediction, flat_target)
             total_loss = torch.mean(self.loss(flat_prediction, flat_target))# *
                                    #torch.Tensor(self.mask_vec).to(image.device.index)
@@ -290,8 +299,8 @@ class ConvnetAttnLstm(BaseModel):
             pp = flat_prediction.detach().cpu().numpy()
             # pp = flat_prediction_norm.detach().cpu().numpy()
             ll = total_loss.detach().cpu().numpy()
-            with open('pickletest.pkl', 'wb') as f:
-                pickle.dump([flat_prediction.detach().cpu().numpy(),flat_target.detach().cpu().numpy(),temp_loss.detach().cpu().numpy() ], f)
+            # with open('pickletest.pkl', 'wb') as f:
+            #     pickle.dump([flat_prediction.detach().cpu().numpy(),flat_target.detach().cpu().numpy(),temp_loss.detach().cpu().numpy() ], f)
             
             self.all_targets.append(tt)
             self.all_predictions.append(pp)

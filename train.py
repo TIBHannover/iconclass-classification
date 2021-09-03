@@ -75,15 +75,15 @@ def main():
 
         callbacks.extend([TensorBoardLogImageCallback])
     elif args.use_wandb:
-        name = f"{args.dataset}-{args.model}"
+        name = f"{args.model}"
         if hasattr(args, "encoder"):
             name += f"-{args.encoder}"
         if hasattr(args, "decoder"):
             name += f"-{args.decoder}"
         name += f"-{uuid.uuid4().hex[:4]}"
-        logger = WandbLogger(project="iart_hierarchical", log_model="all", name=name)
+        logger = WandbLogger(project="iart_hierarchical", log_model=False, name=name)
         logger.watch(model)
-        callbacks.extend([WandbLogImageCallback])
+        callbacks.extend([WandbLogImageCallback()])
     else:
         logging.warning("No logger available")
         logger = None
@@ -110,7 +110,7 @@ def main():
     #     LogImageCallback(),
     #     checkpoint_callback,
     # ]
-
+    print(callbacks)
     trainer = pl.Trainer.from_argparse_args(
         args,
         callbacks=callbacks,

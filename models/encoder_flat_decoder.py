@@ -20,6 +20,7 @@ from models.models import ModelsManager
 
 
 from models.base_model import BaseModel
+from models.utils import gen_filter_mask
 from datasets.utils import read_jsonl, read_jsonl_lb_mapping
 
 from models.loss import FocalBCEWithLogitsLoss
@@ -47,8 +48,6 @@ class EncoderFlatDecoder(BaseModel):
         self.pretrained = dict_args.get("pretrained", None)
 
         self.mapping_path = dict_args.get("mapping_path", None)
-        self.classifier_path = dict_args.get("classifier_path", None)
-        self.label_mapping_path = dict_args.get("label_mapping_path", None)
         self.outpath_f2_per_lbs = dict_args.get("outpath_f2_per_lbs", None)
 
         self.use_label_smoothing = dict_args.get("use_label_smoothing", None)
@@ -67,36 +66,19 @@ class EncoderFlatDecoder(BaseModel):
         self.mask_vec = []
         if self.mapping_path is not None:
             self.mapping_config = read_jsonl(self.mapping_path)
-            for x in self.mapping_config:
-                if x["count"] > self.filter_label_by_count:
-                    self.mask_vec.append(1)
-                else:
-                    self.mask_vec.append(0)
 
-        self.mapping_config = []
-        if self.mapping_path is not None:
-            mm = read_jsonl(self.mapping_path)
-            for x in mm:
-                if x["count"] > self.filter_label_by_count:
-                    self.mapping_config.append(x)
+        self.filter_mask = torch.tensor(
+            gen_filter_mask(self.mapping_config, self.filter_label_by_count, key="count.flat")
+        )
 
         self.num_of_labels = torch.tensor(sum(self.mask_vec))
-
-        self.classifier_config = {}
-        if self.classifier_path is not None:
-            self.classifier_config = read_jsonl(self.classifier_path)
-
-        if self.label_mapping_path is not None:
-            self.label_mapping = read_jsonl_lb_mapping(self.label_mapping_path)
 
         # if self.use_weights is not None:
         #     self.weights = [x['weight'] for x in self.mapping_config]
         #     self.weights = np.array(self.weights)
 
-        self.max_level = len(self.classifier_config)
-
-        self.vocabulary_size = [len(x["tokenizer"]) for x in self.classifier_config]  # get from tockenizer
-        self.max_vocab_size = max(self.vocabulary_size)
+        # self.vocabulary_size = [len(x["tokenizer"]) for x in self.classifier_config]  # get from tockenizer
+        # self.max_vocab_size = max(self.vocabulary_size)
 
         self.encoder = EncodersManager().build_encoder(name=args.encoder, args=args, out_features=1024)
         self.decoder = DecodersManager().build_decoder(
@@ -128,7 +110,7 @@ class EncoderFlatDecoder(BaseModel):
 
     def training_step(self, batch, batch_idx):
         image = batch["image"]
-        target = batch["target"]
+        target = batch["flat_target"]
 
         self.image = image
         # image = F.interpolate(image, size = (299,299), mode= 'bicubic', align_corners=False)
@@ -138,19 +120,21 @@ class EncoderFlatDecoder(BaseModel):
         logits = decoder_result
 
         # print(f"{logits.shape} {target.shape}")
-        self.weights = self.weights.to(decoder_result.device)
-        loss = self.loss(decoder_result, target) * self.weights
+        weights = self.weights.to(decoder_result.device)
+        filter_mask = self.filter_mask.to(decoder_result.device)
+
+        loss = self.loss(decoder_result, target) * weights * filter_mask
 
         if hasattr(self.logger.experiment, "add_histogram"):
             self.logger.experiment.add_histogram(f"train/logits", logits, self.global_step)
             self.logger.experiment.add_histogram(f"train/target", target, self.global_step)
 
-        self.log("train/loss", torch.mean(loss))
+        self.log("train/loss", torch.sum(loss) / torch.sum(filter_mask))
         return {"loss": torch.mean(loss)}
 
     def validation_step(self, batch, batch_idx):
         image = batch["image"]
-        target = batch["target"]
+        target = batch["flat_target"]
 
         self.image = image
         # image = F.interpolate(image, size = (299,299), mode= 'bicubic', align_corners=False)
@@ -161,8 +145,9 @@ class EncoderFlatDecoder(BaseModel):
         logits = decoder_result
         # print(f"{logits.shape} {target.shape}")
 
-        # self.weights = self.weights.to(decoder_result.device)
-        loss = self.loss(decoder_result, target)  # * self.weights
+        weights = self.weights.to(decoder_result.device)
+        filter_mask = self.filter_mask.to(decoder_result.device)
+        loss = self.loss(decoder_result, target) * weights * filter_mask  # * self.weights
 
         if hasattr(self.logger.experiment, "add_histogram"):
             self.logger.experiment.add_histogram(f"val/logits", logits, self.global_step)
@@ -171,10 +156,10 @@ class EncoderFlatDecoder(BaseModel):
         self.fbeta(torch.sigmoid(logits), target)
         self.map(torch.sigmoid(logits), target)
 
-        return {"loss": torch.mean(loss)}
+        return {"loss": torch.sum(loss) / torch.sum(filter_mask)}
 
     def validation_epoch_end(self, outputs):
-        logging.info("EncoderFlatDecoder: validation_epoch_end")
+        logging.info("EncoderFlatDecoder::validation_epoch_end")
 
         loss = 0.0
         count = 0
@@ -184,13 +169,18 @@ class EncoderFlatDecoder(BaseModel):
 
         self.log("val/loss", loss / count, prog_bar=True)
 
+        filter_mask = self.filter_mask
+        self.log("val/filter", torch.sum(filter_mask))
+
+        logging.info("EncoderFlatDecoder::validation_epoch_end -> fbeta")
         fbeta = self.fbeta.compute()
         for thres, value in fbeta.items():
             self.log(f"val/fbeta-{thres}", value)
 
+        logging.info("EncoderFlatDecoder::validation_epoch_end -> map")
         ap_scores_per_class = self.map.compute()
-        map_score = self.map.mean(ap_scores_per_class)
-        print(f"MAP score: {map_score}")
+        map_score = self.map.mean(ap_scores_per_class, filter_mask)
+        logging.info(f"MAP score: {map_score}")
         self.log(f"val/map", map_score, prog_bar=True)
 
         self.fbeta.reset()
@@ -198,17 +188,14 @@ class EncoderFlatDecoder(BaseModel):
 
     @classmethod
     def add_args(cls, parent_parser):
-
-        logging.info("Add EncoderFlatDecoder args")
+        logging.info("EncoderFlatDecoder::add_args")
         parent_parser = super().add_args(parent_parser)
         parent_parser = EncodersManager.add_args(parent_parser)
         parent_parser = DecodersManager.add_args(parent_parser)
         parser = argparse.ArgumentParser(parents=[parent_parser], add_help=False, conflict_handler="resolve")
         # args, _ = parser.parse_known_args()
         # if "classifier_path" not in args:
-        parser.add_argument("--classifier_path", type=str)
         parser.add_argument("--mapping_path", type=str)
-        parser.add_argument("--label_mapping_path", type=str)
         parser.add_argument("--outpath_f2_per_lbs", type=str)
 
         parser.add_argument("--use_diverse_beam_search", action="store_true", default=False)

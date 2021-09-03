@@ -58,14 +58,25 @@ class MAPMetric(Metric):
 
         return torch.tensor(score_per_class)
 
-    def mask_scores(self, score_per_class, mask):
-        return torch.sum(score_per_class * mask) / torch.sum(mask)
+    def mean(self, score_per_class, mask=None):
 
-    def mean(self, score_per_class):
         nan_classes = torch.isnan(score_per_class)
         score_per_class[nan_classes] = 0.0
-        num_classes = torch.sum(nan_classes.float())
-        return (torch.sum(score_per_class) / (num_classes)).float()
+        if mask is not None:
+
+            logging.info(f"Mask sum 1: {torch.sum(mask)}")
+            mask = (1 - nan_classes.float()) * mask
+            logging.info(f"Mask1: {mask}")
+            logging.info(f"Mask sum 2: {torch.sum(mask)}")
+        else:
+            mask = 1 - nan_classes.float()
+            logging.info(f"Mask2: {mask}")
+
+        logging.info(mask)
+        num_classes = torch.sum(mask)
+        logging.info(num_classes)
+
+        return (torch.sum(score_per_class * mask) / num_classes).float()
 
     @property
     def is_differentiable(self) -> bool:

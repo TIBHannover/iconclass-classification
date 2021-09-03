@@ -149,7 +149,18 @@ class IconclassDataloader:
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             drop_last=True,
-            collate_fn=PadCollate(pad_values={"image": 0.0, "image_mask": False, "parents": "#PAD"}),
+            collate_fn=PadCollate(
+                pad_values={
+                    "image": 0.0,
+                    "image_mask": False,
+                    "parents": "#PAD",
+                    "ontology_mask": 0,
+                    "ontology_target": 0,
+                    "ontology_ranges": 0,
+                    "ontology_trace_mask": 0,
+                    "ontology_indexes": -1,
+                }
+            ),
         )
         return dataloader
 
@@ -191,7 +202,18 @@ class IconclassDataloader:
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             drop_last=True,
-            collate_fn=PadCollate(pad_values={"image": 0.0, "image_mask": False, "parents": "#PAD"}),
+            collate_fn=PadCollate(
+                pad_values={
+                    "image": 0.0,
+                    "image_mask": False,
+                    "parents": "#PAD",
+                    "ontology_mask": 0,
+                    "ontology_target": 0,
+                    "ontology_ranges": 0,
+                    "ontology_trace_mask": 0,
+                    "ontology_indexes": -1,
+                }
+            ),
         )
         return dataloader
 

@@ -113,9 +113,9 @@ class ModelCheckpoint(pl.callbacks.ModelCheckpoint):
 
 
 class LogModelWeightCallback(pl.callbacks.Callback):
-    def __init__(self, flush_logs_every_n_steps=None, nrow=2, **kwargs):
+    def __init__(self, log_every_n_steps=None, nrow=2, **kwargs):
         super(LogModelWeightCallback, self).__init__(**kwargs)
-        self.flush_logs_every_n_steps = flush_logs_every_n_steps
+        self.log_every_n_steps = log_every_n_steps
         self.nrow = nrow
 
     @rank_zero_only
@@ -123,10 +123,10 @@ class LogModelWeightCallback(pl.callbacks.Callback):
         if trainer.logger is None:
             return
 
-        if self.flush_logs_every_n_steps is None:
-            log_interval = trainer.flush_logs_every_n_steps
+        if self.log_every_n_steps is None:
+            log_interval = trainer.log_every_n_steps
         else:
-            log_interval = self.flush_logs_every_n_steps
+            log_interval = self.log_every_n_steps
 
         if (trainer.global_step + 1) % log_interval == 0:
             for k, v in pl_module.state_dict().items():
@@ -137,9 +137,9 @@ class LogModelWeightCallback(pl.callbacks.Callback):
 
 
 class TensorBoardLogImageCallback(pl.callbacks.Callback):
-    def __init__(self, flush_logs_every_n_steps=None, nrow=2, **kwargs):
+    def __init__(self, log_every_n_steps=None, nrow=2, **kwargs):
         super(TensorBoardLogImageCallback, self).__init__(**kwargs)
-        self.flush_logs_every_n_steps = flush_logs_every_n_steps
+        self.log_every_n_steps = log_every_n_steps
         self.nrow = nrow
 
     @rank_zero_only
@@ -157,10 +157,10 @@ class TensorBoardLogImageCallback(pl.callbacks.Callback):
             logging.warning(f"TensorBoardLogImageCallback: No TensorBoardLogger detected")
             return
 
-        if self.flush_logs_every_n_steps is None:
-            log_interval = trainer.flush_logs_every_n_steps
+        if self.log_every_n_steps is None:
+            log_interval = trainer.log_every_n_steps
         else:
-            log_interval = self.flush_logs_every_n_steps
+            log_interval = self.log_every_n_steps
 
         if (trainer.global_step + 1) % log_interval == 0:
 
@@ -173,9 +173,9 @@ class TensorBoardLogImageCallback(pl.callbacks.Callback):
 
 
 class WandbLogImageCallback(pl.callbacks.Callback):
-    def __init__(self, flush_logs_every_n_steps=None, nrow=2, **kwargs):
+    def __init__(self, log_every_n_steps=None, nrow=2, **kwargs):
         super(WandbLogImageCallback, self).__init__(**kwargs)
-        self.flush_logs_every_n_steps = flush_logs_every_n_steps
+        self.log_every_n_steps = log_every_n_steps
         self.nrow = nrow
 
     @rank_zero_only
@@ -185,10 +185,10 @@ class WandbLogImageCallback(pl.callbacks.Callback):
         if trainer.logger is None:
             return
 
-        if self.flush_logs_every_n_steps is None:
-            log_interval = trainer.flush_logs_every_n_steps
+        if self.log_every_n_steps is None:
+            log_interval = trainer.log_every_n_steps
         else:
-            log_interval = self.flush_logs_every_n_steps
+            log_interval = self.log_every_n_steps
 
         if (trainer.global_step + 1) % log_interval == 0:
 

@@ -18,6 +18,8 @@ class BaseModel(LightningModule):
         else:
             dict_args = kwargs
 
+        self.dict_args = dict_args
+
         self.lr = dict_args.get("lr", None)
         self.weight_decay = dict_args.get("weight_decay", None)
         self.opt_type = dict_args.get("opt_type", None)
@@ -33,7 +35,9 @@ class BaseModel(LightningModule):
         self.gamma = dict_args.get("gamma", None)
         self.step_size = dict_args.get("step_size", None)
 
-        print(dict_args)
+    def on_train_start(self):
+        print(f"Keys: {self.dict_args.keys()}")
+        self.logger.log_hyperparams(self.dict_args)
 
     @classmethod
     def add_args(cls, parent_parser):
@@ -101,7 +105,11 @@ class BaseModel(LightningModule):
             )
         elif self.opt_type.lower() == "rmsprop":
             optimizer = build_optimizer(
-                self, type=self.opt_type, lr=self.lr, weight_decay=self.weight_decay, momentum=self.momentum,
+                self,
+                type=self.opt_type,
+                lr=self.lr,
+                weight_decay=self.weight_decay,
+                momentum=self.momentum,
             )
         else:
             optimizer = build_optimizer(self, type=self.opt_type, lr=self.lr, weight_decay=self.weight_decay)

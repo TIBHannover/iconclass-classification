@@ -46,29 +46,57 @@ def main():
     mapping_list = read_jsonl(args.input_mapping_path)
     print(mapping_list[100])
     with open(args.output_path, "w") as f:
-        label_sum = None
+        label_sum_yolo = None
+        label_sum_flat = None
         count = 0
-        for d in dataset.train():
-            # print(d.keys())
-            count += d["ids_vec"].shape[0]
-            if label_sum is None:
-                label_sum = d["ids_vec"]
-            else:
-                label_sum = np.sum(np.concatenate([d["ids_vec"], label_sum], axis=0), axis=0, keepdims=True)
 
+        for i, d in enumerate(dataset.train()):
+            # print(d.keys())
+            count += d["yolo_target"].shape[0]
+            if label_sum_yolo is None:
+                label_sum_yolo = d["yolo_target"]
+            else:
+                label_sum_yolo = np.sum(
+                    np.concatenate([d["yolo_target"], label_sum_yolo], axis=0), axis=0, keepdims=True
+                )
+
+            if label_sum_flat is None:
+                label_sum_flat = d["flat_target"]
+            else:
+                label_sum_flat = np.sum(
+                    np.concatenate([d["flat_target"], label_sum_flat], axis=0), axis=0, keepdims=True
+                )
+
+            # print(label_sum_flat.shape)
+            # print(label_sum_flat[0, :10])
+            # print(label_sum_yolo.shape)
+            # print(label_sum_yolo[0, :10])
+            # exit()
             # print(d["target"].shape)
-            max_value = np.amax(np.asarray(label_sum))
-            weights = count / (label_sum.shape[1] * label_sum)
+            max_value = np.amax(np.asarray(label_sum_yolo))
+            weights = count / (label_sum_yolo.shape[1] * label_sum_yolo)
 
             max_weights = np.amax(np.asarray(weights))
             # max_weights =
-            # print(f"{label_sum[:6]} {weights[:6]} {max_value} {max_weights}")
+            # print(f"{label_sum_yolo[:6]} {weights[:6]} {max_value} {max_weights}")
             # print(d)
             # exit()
+            if i % 1000 == 0:
+                print(f"{i} {count} {max_value} {max_weights} {label_sum_yolo.shape}")
+
         weights[np.isinf(weights)] = 1.0
         for x in mapping_list:
             f.write(
-                json.dumps({**x, "count": label_sum[0, x["index"]].item(), "weight": weights[0, x["index"]].item()})
+                json.dumps(
+                    {
+                        **x,
+                        "count": {
+                            "yolo": label_sum_yolo[0, x["index"]].item(),
+                            "flat": label_sum_flat[0, x["index"]].item(),
+                        },
+                        # "weight": {"yolo": {weights[0, x["index"]].item()}, "flat": {}},
+                    }
+                )
                 + "\n"
             )
     return 0

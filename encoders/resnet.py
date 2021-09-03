@@ -54,23 +54,14 @@ class FrozenBatchNorm2d(torch.nn.Module):
 
 @EncodersManager.export("resnet")
 class ResnetEncoder(nn.Module):
-    def __init__(
-        self,
-        args=None,
-        embedding_dim=None,
-        flatten_embedding=None,
-        returned_layers=None,
-        average_pooling=None,
-        **kwargs
-    ):
+    def __init__(self, args=None, out_features=None, returned_layers=None, average_pooling=None, **kwargs):
         super(ResnetEncoder, self).__init__()
         if args is not None:
             dict_args = vars(args)
             dict_args.update(kwargs)
         else:
             dict_args = kwargs
-        self.flatten_embedding = flatten_embedding
-        self.embedding_dim = embedding_dim
+        self.out_features = out_features
         self.returned_layers = returned_layers
 
         self.pretrained = dict_args.get("pretrained", None)
@@ -89,10 +80,12 @@ class ResnetEncoder(nn.Module):
             self.net = resnet152(pretrained=self.pretrained, progress=False, norm_layer=norm_layer)
             self.dim_3 = 1024
             self.dim_4 = 2048
+            self.dim = 2048
         elif int(self.resnet_depth) == 50:
             self.net = resnet50(pretrained=self.pretrained, progress=False, norm_layer=norm_layer)
             self.dim_3 = 1024
             self.dim_4 = 2048
+            self.dim = 2048
 
         ##TODO fix later
         if self.encoder_finetune is not None:
@@ -125,27 +118,28 @@ class ResnetEncoder(nn.Module):
                 if x == "layer3":
                     self.dim.append(self.dim_3)
 
-            if self.embedding_dim is not None:
+            if self.out_features is not None:
                 embedding_layers = []
                 for i, x in enumerate(self.layers_returned):
                     if x == "layer4":
-                        embedding_layers.append(torch.nn.Conv2d(self.dim_4, self.embedding_dim, kernel_size=[1, 1]))
+                        embedding_layers.append(torch.nn.Conv2d(self.dim_4, self.out_features, kernel_size=[1, 1]))
                     elif x == "layer3":
-                        embedding_layers.append(torch.nn.Conv2d(self.dim_3, self.embedding_dim, kernel_size=[1, 1]))
+                        embedding_layers.append(torch.nn.Conv2d(self.dim_3, self.out_features, kernel_size=[1, 1]))
 
                 # several outputs
                 if len(embedding_layers) > 0:
                     self.feature_emb = torch.nn.ModuleList(embedding_layers)
                 else:
                     self.feature_emb = torch.nn.ModuleList(
-                        [torch.nn.Conv2d(self.dim_4, self.embedding_dim, kernel_size=[1, 1])]
+                        [torch.nn.Conv2d(self.dim_4, self.out_features, kernel_size=[1, 1])]
                     )
+                self.dim = self.out_features
         else:
-            if self.embedding_dim is not None:
+            if self.out_features is not None:
                 self.feature_emb = torch.nn.ModuleList(
-                    [torch.nn.Conv2d(self.dim[0], self.embedding_dim, kernel_size=[1, 1])]
+                    [torch.nn.Conv2d(self.dim[0], self.out_features, kernel_size=[1, 1])]
                 )
-                self.dim[0] = self.embedding_dim
+                self.dim = self.out_features
 
         if self.byol_embedding_path is not None:
             self.load_pretrained_byol(self.byol_embedding_path)
@@ -158,7 +152,7 @@ class ResnetEncoder(nn.Module):
         if self.layers_returned is not None:
             x = self.body(x)
             # x = self.net(x)
-            if self.embedding_dim is not None:
+            if self.out_features is not None:
                 x = [self.feature_emb[i](x[str(i)]) for i in range(len(self.layers_returned))]
             else:
                 x = [x[str(i)] for i in range(len(self.layers_returned))]
@@ -166,15 +160,15 @@ class ResnetEncoder(nn.Module):
         else:
             x = [self.net(x)]
 
-            if self.embedding_dim is not None:
+            if self.out_features is not None:
                 x = [self.feature_emb[0](x[0])]
 
         if self.average_pooling:
             x = [self.avgpool(y) for y in x]
 
-        if self.flatten_embedding:
-            x = [y.permute(0, 2, 3, 1).reshape(y.size(0), -1, y.size(1)) for y in x]
-        return x
+        x = [y.permute(0, 2, 3, 1).reshape(y.size(0), -1, y.size(1)) for y in x]
+
+        return torch.cat(x, dim=1)
 
     @classmethod
     def add_args(cls, parent_parser):

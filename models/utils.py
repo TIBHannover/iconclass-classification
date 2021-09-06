@@ -82,6 +82,7 @@ def add_sequence_tokens_to_index(seq, add_start=True, add_stop=False, pad_token=
     if add_start:
         padding_values = torch.ones(seq.shape[:-1] + torch.Size([1]), dtype=torch.int32, device=seq.device)
         seq = torch.cat([padding_values, seq], dim=dim)
+
     if add_stop:
         padding_values = torch.zeros(seq.shape[:-1] + torch.Size([1]), dtype=torch.int32, device=seq.device)
         seq = torch.cat([seq, padding_values], dim=dim)

@@ -22,15 +22,11 @@ from models.models import ModelsManager
 
 from models.base_model import BaseModel
 from models.utils import gen_filter_mask
-from datasets.utils import read_jsonl, read_jsonl_lb_mapping
+from datasets.utils import read_jsonl
 
 from models.loss import FocalBCEWithLogitsLoss
 from encoders import EncodersManager
 from decoders import DecodersManager
-
-
-import pandas as pd
-import pickle
 
 from metrics import FBetaMetric, MAPMetric
 
@@ -164,7 +160,7 @@ class EncoderHierarchicalDecoder(BaseModel):
         # flat traces to batch
         tgt_level_with_tokens = [t.reshape(-1, t.shape[-1]) for t in tgt_level_with_tokens]
         mask_level_with_tokens = [t.reshape(-1, t.shape[-1]) for t in mask_level_with_tokens]
-        src_level_with_tokens = src.reshape(-1, src_level_with_tokens.shape[-1])
+        src_level_with_tokens = src_level_with_tokens.reshape(-1, src_level_with_tokens.shape[-1])
         trace_mask = trace_mask.reshape(-1)
 
         # compute hierarchical prediction
@@ -178,33 +174,20 @@ class EncoderHierarchicalDecoder(BaseModel):
         filter_mask_level_with_tokens = utils.add_sequence_tokens_to_level_ontology(filter_mask_level, value=1.0)
 
         losses = []
-        for t, y, w, f in zip(
-            tgt_level_with_tokens, decoder_result, weights_level_with_tokens, filter_mask_level_with_tokens
+        for t, y, w, f, m in zip(
+            tgt_level_with_tokens,
+            decoder_result,
+            weights_level_with_tokens,
+            filter_mask_level_with_tokens,
+            mask_level_with_tokens,
         ):
-            loss = torch.mean(self.loss(y, t) * w * f)  # * weights * filter_mask  # * self.weights
+            final_mask = f * m * torch.unsqueeze(trace_mask, dim=-1)
+            loss = self.loss(y, t) * w * final_mask
+
+            loss = torch.sum(loss) / torch.sum(final_mask)
             losses.append(loss)
 
         loss = torch.mean(torch.stack(losses))
-        # image = batch["image"]
-        # source = batch["source_id_sequence"]
-        # target = batch["target_vec"]
-
-        # self.image = image
-        # # image = F.interpolate(image, size = (299,299), mode= 'bicubic', align_corners=False)
-        # # forward image
-        # image_embedding = self.encoder(image)
-        # decoder_result = self.decoder(image_embedding)
-        # logits = decoder_result
-
-        # # print(f"{logits.shape} {target.shape}")
-        # weights = self.weights.to(decoder_result.device)
-        # filter_mask = self.filter_mask.to(decoder_result.device)
-
-        # loss = self.loss(decoder_result, target) * weights * filter_mask
-
-        # if hasattr(self.logger.experiment, "add_histogram"):
-        #     self.logger.experiment.add_histogram(f"train/logits", logits, self.global_step)
-        #     self.logger.experiment.add_histogram(f"train/target", target, self.global_step)
 
         self.log("train/loss", torch.mean(loss))
         return {"loss": torch.mean(loss)}
@@ -221,7 +204,9 @@ class EncoderHierarchicalDecoder(BaseModel):
         mask_level = utils.map_to_level_ontology(batch["ontology_mask"], batch["ontology_levels"])
 
         # add pad and start
-        src_level_with_tokens = utils.add_sequence_tokens_to_index(src, add_start=True)[:, :, :-1]
+        src_level_with_tokens = utils.add_sequence_tokens_to_index(src, add_start=True)
+
+        src_level_with_tokens = src_level_with_tokens[:, :, :-1]
         tgt_level_with_tokens = utils.add_sequence_tokens_to_level_ontology_target(tgt_level, mask_level)
         mask_level_with_tokens = utils.add_sequence_tokens_to_level_ontology(mask_level)
 
@@ -236,7 +221,7 @@ class EncoderHierarchicalDecoder(BaseModel):
         # flat traces to batch
         tgt_level_with_tokens = [t.reshape(-1, t.shape[-1]) for t in tgt_level_with_tokens]
         mask_level_with_tokens = [t.reshape(-1, t.shape[-1]) for t in mask_level_with_tokens]
-        src_level_with_tokens = src.reshape(-1, src_level_with_tokens.shape[-1])
+        src_level_with_tokens = src_level_with_tokens.reshape(-1, src_level_with_tokens.shape[-1])
         trace_mask = trace_mask.reshape(-1)
 
         # compute hierarchical prediction
@@ -250,10 +235,18 @@ class EncoderHierarchicalDecoder(BaseModel):
         filter_mask_level_with_tokens = utils.add_sequence_tokens_to_level_ontology(filter_mask_level, value=1.0)
 
         losses = []
-        for t, y, w, f in zip(
-            tgt_level_with_tokens, decoder_result, weights_level_with_tokens, filter_mask_level_with_tokens
+        for t, y, w, f, m in zip(
+            tgt_level_with_tokens,
+            decoder_result,
+            weights_level_with_tokens,
+            filter_mask_level_with_tokens,
+            mask_level_with_tokens,
         ):
-            loss = torch.mean(self.loss(y, t) * w * f)  # * weights * filter_mask  # * self.weights
+
+            final_mask = f * m * torch.unsqueeze(trace_mask, dim=-1)
+            loss = self.loss(y, t) * w * final_mask
+
+            loss = torch.sum(loss) / torch.sum(final_mask)
             losses.append(loss)
 
         loss = torch.mean(torch.stack(losses))
@@ -265,8 +258,29 @@ class EncoderHierarchicalDecoder(BaseModel):
             self.logger.experiment.add_histogram(f"val/logits", flat_prediction, self.global_step)
             self.logger.experiment.add_histogram(f"val/target", flat_target, self.global_step)
 
-        self.fbeta(torch.sigmoid(flat_prediction), flat_target)
-        self.map(torch.sigmoid(flat_prediction), flat_target)
+        # delete empty traces
+        # TODO Javad maybe we can merge all traces in one vector
+        if True:
+            trace_flat_prediction = torch.sigmoid(flat_prediction)[trace_mask == 1, ...]
+            trace_flat_target = flat_target[trace_mask == 1, ...]
+
+            # print("##############################")
+            # print(trace_flat_prediction[:5, :20])
+            # print(trace_flat_target[:5, :20])
+            # else:
+            trace_flat_prediction = torch.sum(torch.sigmoid(flat_prediction).reshape(target.shape), dim=1)
+            trace_flat_prediction /= torch.sum(batch["ontology_mask"], dim=1)
+            trace_flat_prediction[torch.isnan(trace_flat_prediction)] = 0
+            trace_flat_prediction[torch.isinf(trace_flat_prediction)] = 0
+
+            trace_flat_target = torch.sum(target, dim=1) / torch.sum(batch["ontology_mask"], dim=1)
+            trace_flat_target[torch.isnan(trace_flat_target)] = 0
+
+            # print(trace_flat_prediction[0, :20])
+            # print(trace_flat_target[0, :20])
+
+        self.fbeta(trace_flat_prediction, trace_flat_target)
+        self.map(trace_flat_prediction, trace_flat_target)
 
         return {"loss": torch.mean(loss)}
 

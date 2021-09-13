@@ -83,7 +83,7 @@ def main():
         name += f"-{uuid.uuid4().hex[:4]}"
         logger = WandbLogger(project="iart_hierarchical", log_model=False, name=name)
         logger.watch(model)
-        callbacks.extend([WandbLogImageCallback()])
+        # callbacks.extend([WandbLogImageCallback()])
     else:
         logging.warning("No logger available")
         logger = None

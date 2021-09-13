@@ -8,7 +8,7 @@ import torch
 import torchvision
 import imageio
 
-from datasets.image_pipeline import ImagePreprocessingPipeline
+from datasets.image_pipeline import IconclassImagePreprocessingPipeline
 from datasets.datasets import DatasetsManager
 from datasets.pipeline import (
     Pipeline,
@@ -32,7 +32,7 @@ class IconclassFlattenDecoderPipeline(Pipeline):
         self.mapping = mapping
         self.classifier = classifier
         self.mapping_list = list(mapping)
-        
+
     def call(self, datasets=None, **kwargs):
         def decode(sample):
             y_onehot_0 = torch.zeros(len(self.mapping))
@@ -65,10 +65,10 @@ class IconclassFlattenDataloader(IconclassDataloader):
         mm = {}
         if self.mapping_path is not None:
             mm = read_jsonl(self.mapping_path, dict_key="id")
-            for k,v in mm.items():
-                if v['count'] >self.filter_label_by_count:
+            for k, v in mm.items():
+                if v["count"] > self.filter_label_by_count:
                     self.mapping[k] = v
-            
+
         self.classifier = {}
         if self.classifier_path is not None:
             self.classifier = read_jsonl(self.classifier_path)

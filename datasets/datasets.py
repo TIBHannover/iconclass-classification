@@ -22,6 +22,7 @@ class DatasetsManager:
         parser.add_argument("-d", "--dataset", help="Dasaset to be loaded")
 
         args, _ = parser.parse_known_args()
+        assert args.dataset in cls._datasets, f"Dataset {args.dataset} is not defined"
         for dataset, c in cls._datasets.items():
             if dataset != args.dataset:
                 continue

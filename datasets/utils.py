@@ -95,17 +95,19 @@ def read_jsonl(path, dict_key=None, keep_keys=None):
 
     return data
 
+
 def write_jsonl_lb_mapping(path, outpath):
-    #read icon meta file and write the mapping file
+    # read icon meta file and write the mapping file
     data = read_jsonl(path)
-    with open(outpath, mode ='a') as f:
+    with open(outpath, mode="a") as f:
         for i in data:
-            json_rec = json.dumps({i['id']:i['kw']})
-            f.write(json_rec + '\n')
-            
+            json_rec = json.dumps({i["id"]: i["kw"]})
+            f.write(json_rec + "\n")
+
+
 def read_jsonl_lb_mapping(path):
-    #read label mapping file 
-    #output a dictionary key:id value:labels
+    # read label mapping file
+    # output a dictionary key:id value:labels
     data = dict()
     with open(path, "r") as f:
         for line in f:

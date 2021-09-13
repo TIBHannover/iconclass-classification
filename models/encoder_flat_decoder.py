@@ -67,9 +67,12 @@ class EncoderFlatDecoder(BaseModel):
         if self.mapping_path is not None:
             self.mapping_config = read_jsonl(self.mapping_path)
 
-        self.filter_mask = torch.tensor(
-            gen_filter_mask(self.mapping_config, self.filter_label_by_count, key="count.flat")
-        )
+        if self.filter_label_by_count is not None:
+            self.filter_mask = torch.tensor(
+                gen_filter_mask(self.mapping_config, self.filter_label_by_count, key="count.flat")
+            )
+        else:
+            self.filter_mask = torch.ones(len(self.mapping_config), dtype=torch.float32)
 
         self.num_of_labels = torch.tensor(sum(self.mask_vec))
 
@@ -207,7 +210,7 @@ class EncoderFlatDecoder(BaseModel):
         parser.add_argument("--focal_loss_gamma", type=float, default=2)
         parser.add_argument("--focal_loss_alpha", type=float, default=0.25)
 
-        parser.add_argument("--filter_label_by_count", type=int, default=0)
+        parser.add_argument("--filter_label_by_count", type=int, default=None)
 
         parser.add_argument("--best_threshold", nargs="+", type=float, default=[0.2])
         return parser

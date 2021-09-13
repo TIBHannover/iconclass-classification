@@ -3,6 +3,8 @@ import sys
 import re
 import argparse
 
+import random
+
 import json
 import logging
 
@@ -19,6 +21,9 @@ def parse_args():
     parser.add_argument("-c", "--classifiers", help="path to dir of images")
     parser.add_argument("-y", "--yolo_coco_map", help="path to dir of images")
     parser.add_argument("-n", "--yolo_coco_names", help="path to dir of images")
+
+    parser.add_argument("-r", "--slice", type=str, default="::1", help="data slice to stored")
+
     args = parser.parse_args()
     return args
 
@@ -49,13 +54,26 @@ def read_coco_annotations(annotation_path):
             data[image_path]["classes_label"].append(categories_lut[anno["category_id"]])
             data[image_path]["bbox"].append(anno["bbox"])
 
-    return data
+    result = {}
+    for k, v in data.items():
+        if "bbox" not in v:
+            continue
+        result[k] = v
+
+    return result
 
 
 def main():
     args = parse_args()
 
+    random.seed(1337)
+
     data = read_coco_annotations(args.annotation)
+
+    data_slice = slice(*[int(x) if x else None for x in args.slice.split(":")])
+    print(len(data))
+    data = {k: v for k, v in [(k, v) for k, v in data.items()][data_slice]}
+    print(len(data))
 
     mapping = read_jsonl(args.mapping, dict_key="index")
     classifiers = read_jsonl(args.classifiers, dict_key="id")
@@ -80,15 +98,10 @@ def main():
             y_coco_index = yolo_coco_names[l]
             y_9000_index = yolo_coco_map[y_coco_index]
             m = mapping[y_9000_index]
-            # print(f"{l} {c} {m}")
 
             classes.append({"bbox": b, "class": m["index"], "name": m["name"], "id": m["id"], "index": m["index"]})
-        # print(classes)
-        # print(x)
+
         annotations.append({"id": x["id"], "path": x["path"], "classes": classes})
-        # print(b, c)
-        # print(x)
-        # exit()
 
     with open(args.output, "w") as f:
         for anno in annotations:

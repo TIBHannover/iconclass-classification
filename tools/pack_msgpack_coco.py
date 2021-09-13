@@ -26,9 +26,9 @@ def parse_args():
     parser.add_argument("-i", "--image_path", help="verbose output")
     parser.add_argument("-a", "--annotation", help="verbose output")
     parser.add_argument("-o", "--output", help="path to dir of images")
-    parser.add_argument("-m", "--msgpack", help="path to dir of images")
     parser.add_argument("-p", "--process", type=int, default=8)
     parser.add_argument("-c", "--chunck", type=int, default=1024, help="Images per file")
+    parser.add_argument("-r", "--slice", type=str, default="::1", help="data slice to stored")
 
     parser.add_argument("-s", "--shuffle", action="store_true", default=True, help="verbose output")
 
@@ -115,12 +115,18 @@ def main():
     if args.verbose:
         level = logging.INFO
 
+    random.seed(1337)
+
     logging.basicConfig(format="%(asctime)s %(levelname)s: %(message)s", datefmt="%d-%m-%Y %H:%M:%S", level=level)
 
     image_loader = ImageDataloader(args.image_path, shuffle=args.shuffle)
     whitelist = None
     if args.annotation:
         whitelist = read_coco_annotations(args.annotation)
+        data_slice = slice(*[int(x) if x else None for x in args.slice.split(":")])
+        print(len(whitelist))
+        whitelist = {k: v for k, v in [(k, v) for k, v in whitelist.items()][data_slice]}
+        print(len(whitelist))
 
         logging.info(len(image_loader))
 
@@ -141,9 +147,11 @@ def main():
             image_loader[i]["id"] = whitelist[match[1] + match[5]]["id"]
 
         logging.info(len(image_loader))
+
+    # exit()
     count = 0
     with mp.Pool(args.process) as pool:
-        with MsgPackWriter(args.msgpack) as f:
+        with MsgPackWriter(args.output) as f:
             start = time.time()
             image_loader = [{**x} for x in image_loader]
             for i, x in enumerate(pool.imap(read_image_process, image_loader)):

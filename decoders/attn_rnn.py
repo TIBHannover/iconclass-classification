@@ -73,17 +73,15 @@ class AttnRNNLevelWise(nn.Module):
 
         context_vec, attention_weights = self.attention(encoder_out, hidden)
 
-        if level < 9:
-            x = self.embedding[level](x)
-
+        x = self.embedding[level](x)
+        # print(f"{context_vec.shape} {level} {x.shape}")
         x = torch.cat([context_vec, torch.squeeze(x, 1)], dim=1)
 
         output = self.gru(x, hidden)
 
         x = self.fc1(output)
 
-        if level < 9:
-            x = self.fc3[level](x)
+        x = self.fc3[level](x)
 
         return x, output, attention_weights
 

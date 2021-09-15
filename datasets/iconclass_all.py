@@ -13,7 +13,15 @@ from datasets.pipeline import (
 from datasets.utils import read_jsonl
 from datasets.iconclass import IconclassDataloader
 
-from models.utils import build_level_map
+# from models.utils import build_level_map
+
+
+def build_level_map(mapping):
+    level_map = torch.zeros(len(mapping), dtype=torch.int64)
+    for m in mapping:
+        level_map[m["index"]] = len(m["parents"])
+
+    return level_map
 
 
 # alternativ

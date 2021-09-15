@@ -152,10 +152,6 @@ class EncoderFlatDecoder(BaseModel):
         filter_mask = self.filter_mask.to(decoder_result.device)
         loss = self.loss(decoder_result, target) * weights * filter_mask  # * self.weights
 
-        if hasattr(self.logger.experiment, "add_histogram"):
-            self.logger.experiment.add_histogram(f"val/logits", logits, self.global_step)
-            self.logger.experiment.add_histogram(f"val/target", target, self.global_step)
-
         self.fbeta(torch.sigmoid(logits), target)
         self.map(torch.sigmoid(logits), target)
 
@@ -178,7 +174,7 @@ class EncoderFlatDecoder(BaseModel):
         logging.info("EncoderFlatDecoder::validation_epoch_end -> fbeta")
         fbeta = self.fbeta.compute()
         for thres, value in fbeta.items():
-            self.log(f"val/fbeta-{thres}", value)
+            self.log(f"val/fbeta-{thres}", self.fbeta.mean(value, filter_mask))
 
         logging.info("EncoderFlatDecoder::validation_epoch_end -> map")
         ap_scores_per_class = self.map.compute()

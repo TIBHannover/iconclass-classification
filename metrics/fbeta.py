@@ -71,7 +71,7 @@ class FBetaMetric(Metric):
         return mask
 
     def get_score(self, y_pred, all_targets):
-        return fbeta_score(all_targets, y_pred, beta=2, average="macro")
+        return fbeta_score(all_targets, y_pred, beta=2, average=None)
 
     def compute(self) -> Union[Tensor, List[Tensor]]:
         """Compute the average precision score.
@@ -89,11 +89,31 @@ class FBetaMetric(Metric):
         metrics = {}
         arg_sorted = preds.argsort(axis=1)
         for threshold in self.thresholds:
-            metrics[f"{threshold:.2f}"] = self.get_score(
-                self.binarize_prediction(preds, threshold, arg_sorted), targets
+            metrics[f"{threshold:.2f}"] = torch.tensor(
+                self.get_score(self.binarize_prediction(preds, threshold, arg_sorted), targets)
             )
 
         return metrics
+
+    def mean(self, score_per_class, mask=None):
+
+        nan_classes = torch.isnan(score_per_class)
+        score_per_class[nan_classes] = 0.0
+        if mask is not None:
+
+            logging.info(f"Mask sum 1: {torch.sum(mask)}")
+            mask = (1 - nan_classes.float()) * mask
+            logging.info(f"Mask1: {mask}")
+            logging.info(f"Mask sum 2: {torch.sum(mask)}")
+        else:
+            mask = 1 - nan_classes.float()
+            logging.info(f"Mask2: {mask}")
+
+        logging.info(mask)
+        num_classes = torch.sum(mask)
+        logging.info(num_classes)
+
+        return (torch.sum(score_per_class * mask) / num_classes).float()
 
     @property
     def is_differentiable(self) -> bool:

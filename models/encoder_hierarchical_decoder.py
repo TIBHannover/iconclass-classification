@@ -103,7 +103,7 @@ class EncoderHierarchicalDecoder(BaseModel):
         #     self.weights = [x['weight'] for x in self.mapping_config]
         #     self.weights = np.array(self.weights)
 
-        self.encoder = EncodersManager().build_encoder(name=args.encoder, args=args, out_features=256)
+        self.encoder = EncodersManager().build_encoder(name=args.encoder, args=args)
         self.decoder = DecodersManager().build_decoder(
             name=args.decoder,
             args=args,
@@ -258,10 +258,6 @@ class EncoderHierarchicalDecoder(BaseModel):
         # flat output (similar to yolo)
         flat_prediction = utils.map_to_flat_ontology(decoder_without_tokens, batch["ontology_levels"])
 
-        if hasattr(self.logger.experiment, "add_histogram"):
-            self.logger.experiment.add_histogram(f"val/logits", flat_prediction, self.global_step)
-            self.logger.experiment.add_histogram(f"val/target", flat_target, self.global_step)
-
         # delete empty traces
         # TODO Javad maybe we can merge all traces in one vector
         if True:
@@ -305,7 +301,7 @@ class EncoderHierarchicalDecoder(BaseModel):
         logging.info("EncoderHierarchicalDecoder::validation_epoch_end -> fbeta")
         fbeta = self.fbeta.compute()
         for thres, value in fbeta.items():
-            self.log(f"val/fbeta-{thres}", value)
+            self.log(f"val/fbeta-{thres}", self.fbeta.mean(value, filter_mask))
 
         logging.info("EncoderHierarchicalDecoder::validation_epoch_end -> map")
         ap_scores_per_class = self.map.compute()

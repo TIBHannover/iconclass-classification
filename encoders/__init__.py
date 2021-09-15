@@ -1,3 +1,3 @@
 from encoders.encoders import EncodersManager
 from encoders.vit import VitEncoder
-from encoders.resnet import ResnetEncoder
+from encoders.resnet import ResnetEncoder, ResnetPositionEncoder

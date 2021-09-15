@@ -129,10 +129,6 @@ class EncoderYoloDecoder(BaseModel):
 
         loss = self.loss(decoder_result, target) * weights * filter_mask * classes_mask
 
-        if hasattr(self.logger.experiment, "add_histogram"):
-            self.logger.experiment.add_histogram(f"train/logits", logits, self.global_step)
-            self.logger.experiment.add_histogram(f"train/target", target, self.global_step)
-
         self.log("train/loss", torch.sum(loss) / torch.sum(filter_mask * classes_mask))
         return {"loss": torch.mean(loss)}
 
@@ -180,7 +176,7 @@ class EncoderYoloDecoder(BaseModel):
         logging.info("EncoderYoloDecoder::validation_epoch_end -> fbeta")
         fbeta = self.fbeta.compute()
         for thres, value in fbeta.items():
-            self.log(f"val/fbeta-{thres}", value)
+            self.log(f"val/fbeta-{thres}", self.fbeta.mean(value, filter_mask))
 
         logging.info("EncoderYoloDecoder::validation_epoch_end -> map")
         ap_scores_per_class = self.map.compute()

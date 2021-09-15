@@ -196,8 +196,7 @@ class CocoImageTestPreprocessingPipeline(Pipeline):
             classes = list(set(classes))
 
             if len(classes) == 0:
-
-                print(f"{ious} {crop} {image.shape} {sample['classes']}")
+                # print(f"{ious} {crop} {image.shape} {sample['classes']}")
                 return None
 
             image = self.transforms(image_with_crop["image"])

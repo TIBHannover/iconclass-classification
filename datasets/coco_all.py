@@ -17,7 +17,7 @@ from datasets.pipeline import (
 
 from datasets.utils import read_jsonl
 
-from models.utils import build_level_map
+# from models.utils import build_level_map
 from datasets.image_pipeline import (
     CocoImageTrainPreprocessingPipeline,
     ImageDecodePipeline,
@@ -38,6 +38,14 @@ from datasets.pipeline import (
     split_chunk_by_workers,
 )
 from datasets.pad_collate import PadCollate
+
+
+def build_level_map(mapping):
+    level_map = torch.zeros(len(mapping), dtype=torch.int64)
+    for m in mapping:
+        level_map[m["index"]] = len(m["parents"])
+
+    return level_map
 
 
 class CocoAllDecoderPipeline(Pipeline):
@@ -186,8 +194,6 @@ class CocoAllDecoderPipeline(Pipeline):
                     target = target + m * ontology_mask[j] * ontology_target[j]
                 target[target > 0] = 1
                 ontology_target[i] = target
-        if len(ontology_mask) == 0:
-            print(sample["classes"])
 
         if self.max_traces is not None and self.max_traces > 0:
             ontology_mask = ontology_mask[: self.max_traces]

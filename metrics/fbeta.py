@@ -71,7 +71,10 @@ class FBetaMetric(Metric):
         return mask
 
     def get_score(self, y_pred, all_targets):
-        return fbeta_score(all_targets, y_pred, beta=2, average=None)
+        mask = np.sum(all_targets, axis=0)
+        score = fbeta_score(all_targets, y_pred, beta=2, average=None, zero_division=0.0)
+        score[mask == 0] = np.nan
+        return score
 
     def compute(self) -> Union[Tensor, List[Tensor]]:
         """Compute the average precision score.
@@ -100,18 +103,11 @@ class FBetaMetric(Metric):
         nan_classes = torch.isnan(score_per_class)
         score_per_class[nan_classes] = 0.0
         if mask is not None:
-
-            logging.info(f"Mask sum 1: {torch.sum(mask)}")
             mask = (1 - nan_classes.float()) * mask
-            logging.info(f"Mask1: {mask}")
-            logging.info(f"Mask sum 2: {torch.sum(mask)}")
         else:
             mask = 1 - nan_classes.float()
-            logging.info(f"Mask2: {mask}")
 
-        logging.info(mask)
         num_classes = torch.sum(mask)
-        logging.info(num_classes)
 
         return (torch.sum(score_per_class * mask) / num_classes).float()
 

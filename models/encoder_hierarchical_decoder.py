@@ -264,11 +264,12 @@ class EncoderHierarchicalDecoder(BaseModel):
             trace_flat_prediction = torch.sigmoid(flat_prediction)[trace_mask == 1, ...]
             trace_flat_target = flat_target[trace_mask == 1, ...]
 
-            # print("##############################")
-            # print(trace_flat_prediction[:5, :20])
-            # print(trace_flat_target[:5, :20])
-            # else:
-            trace_flat_prediction = torch.sum(torch.sigmoid(flat_prediction).reshape(target.shape), dim=1)
+            trace_flat_prediction = torch.sigmoid(flat_prediction).reshape(target.shape)
+            trace_flat_prediction = torch.sum(trace_flat_prediction * batch["ontology_mask"], dim=1)
+
+            a = trace_flat_prediction
+            b = torch.sum(batch["ontology_mask"], dim=1)
+
             trace_flat_prediction /= torch.sum(batch["ontology_mask"], dim=1)
             trace_flat_prediction[torch.isnan(trace_flat_prediction)] = 0
             trace_flat_prediction[torch.isinf(trace_flat_prediction)] = 0
@@ -278,7 +279,6 @@ class EncoderHierarchicalDecoder(BaseModel):
 
             # print(trace_flat_prediction[0, :20])
             # print(trace_flat_target[0, :20])
-
         self.fbeta(trace_flat_prediction, trace_flat_target)
         self.map(trace_flat_prediction, trace_flat_target)
 

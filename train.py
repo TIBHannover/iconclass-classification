@@ -38,6 +38,7 @@ def parse_args():
     parser.add_argument("--output_path", help="verbose output")
     parser.add_argument("--use_wandb", action="store_true", help="verbose output")
     parser.add_argument("--progress_refresh_rate", type=int, default=100, help="verbose output")
+    parser.add_argument("--wand_name", help="verbose output")
     parser.add_argument("--checkpoint_save_interval", type=int, default=100, help="verbose output")
     parser = pl.Trainer.add_argparse_args(parser)
     parser = DatasetsManager.add_args(parser)
@@ -81,6 +82,9 @@ def main():
         if hasattr(args, "decoder"):
             name += f"-{args.decoder}"
         name += f"-{uuid.uuid4().hex[:4]}"
+
+        if args.wand_name is not None:
+            name = args.wand_name
         logger = WandbLogger(project="iart_hierarchical", log_model=False, name=name)
         logger.watch(model)
         # callbacks.extend([WandbLogImageCallback()])
@@ -104,13 +108,6 @@ def main():
 
     callbacks.extend([checkpoint_callback])
 
-    # callbacks = [
-    #     ProgressPrinter(refresh_rate=args.progress_refresh_rate),
-    #     pl.callbacks.LearningRateMonitor(),
-    #     LogImageCallback(),
-    #     checkpoint_callback,
-    # ]
-    print(callbacks)
     trainer = pl.Trainer.from_argparse_args(
         args,
         callbacks=callbacks,

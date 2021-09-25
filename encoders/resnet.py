@@ -74,6 +74,8 @@ class ResnetEncoder(nn.Module):
         self.layers_returned = dict_args.get("layers_returned", ["layer4"])
         self.resnet_depth = dict_args.get("resnet_depth", "50")
 
+        self.out_features = dict_args.get("resnet_output_depth")
+
         norm_layer = None
         if self.use_frozen_batch_norm:
             norm_layer = FrozenBatchNorm2d
@@ -185,6 +187,8 @@ class ResnetEncoder(nn.Module):
         parser.add_argument("--use_frozen_batch_norm", action="store_true")
         parser.add_argument("--layers_returned", nargs="+", default=["layer4"])
         parser.add_argument("--resnet_depth", choices=["50", "152"], default="50")
+
+        parser.add_argument("--resnet_output_depth", type=int, default=None)
 
         return parser
 

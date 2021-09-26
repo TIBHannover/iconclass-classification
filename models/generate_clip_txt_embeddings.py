@@ -5,7 +5,7 @@ import sys
 import re
 import argparse
 
-import clip
+# import clip
 import json
 import pickle
 import logging
@@ -17,6 +17,9 @@ from scipy.special import softmax
 from PIL import Image
 
 from torchvision.transforms import Compose, Resize, CenterCrop, ToTensor, Normalize
+
+from encoders.clip import CLIP, convert_weights
+from tools import tokenizer_clip 
 
 
 def get_element(data_dict: dict, path: str, split_element="."):
@@ -73,10 +76,38 @@ def get_device():
 
     return device
 
-
+def load_clip(model_path):
+        vision_width = 768
+        vision_layers = 12
+        vision_patch_size = 32
+        grid_size = 7
+        image_resolution = 224
+        embed_dim = 512
+    
+        context_length=77
+        vocab_size=49408
+        transformer_width=512
+        transformer_heads=8
+        transformer_layers=12
+        
+        net = CLIP(embed_dim,
+        image_resolution, vision_layers, vision_width, vision_patch_size,
+        context_length, vocab_size, transformer_width, transformer_heads, transformer_layers)
+        
+        #adapting the keys in statedict
+        loaded_dict = torch.load(model_path)["state_dict"]
+        # print(loaded_dict.keys())
+        prefix = 'net.'
+        n_cut = len(prefix)
+        adapted_dict = {k[n_cut:]: v for k, v in loaded_dict.items()
+                        if k.startswith(prefix)}
+        # print(adapted_dict.keys())
+        net.load_state_dict(adapted_dict)
+        return net
+        
 def get_model():
-    model, _ = clip.load(get_model_name(), device=get_device())
-
+    # model, _ = clip.load(get_model_name(), device=get_device())
+    
     return model
 
 
@@ -102,9 +133,9 @@ def tokenize(cls):
     return [clip.tokenize(cl) for cl in cls]
 
 
-def get_text_features(model, cls, normalize=True):
-    text = torch.cat(tokenize(cls)).to(get_device())
-
+def get_text_features(tk, model, cls, normalize=True):
+    # text = torch.cat(tokenize(cls)).to(get_device())
+    text = tokenizer_clip.tokenize(tk, cls, truncate = True)
     with torch.no_grad():
         features = model.encode_text(text)
 
@@ -165,11 +196,14 @@ def get_top_k(img_features, txt_features):
 
 
 def parse_args():
+
     parser = argparse.ArgumentParser(description="")
 
     parser.add_argument("-v", "--verbose", action="store_true", help="verbose output")
     parser.add_argument("-t", "--txt_path", help="verbose output")
+    parser.add_argument("-m", "--model_path", help="verbose output")
     parser.add_argument("-o", "--output_path", help="verbose output")
+    parser.add_argument("--bpe_vocab_path", type=str)
     args = parser.parse_args()
     return args
 
@@ -177,14 +211,20 @@ def parse_args():
 def main():
     args = parse_args()
 
-    model = get_model()
+    model = load_clip(args.model_path)
     data = read_jsonl(args.txt_path)
+    tk = tokenizer_clip._Tokenizer(args)
     with open(args.output_path, "wb") as f:
         text_mapping = []
         for i, x in enumerate(data):
-            text_data = ", ".join(x["kw"]["en"]) + ", " + x["txt"]["en"]
-            text_vec = get_text_features(model, text_data[:77])
+            # text_data = ", ".join(x["kw"]["en"]) + ", " + x["txt"]["en"]
+            txt_label = x["txt"]
+            text_data = " ".join(txt_label)
+            text_vec = get_text_features(tk, model, text_data)
+            
 
+
+            
             text_mapping.append({**x, "clip": text_vec})
             print(i)
             if i % 100 == 0:

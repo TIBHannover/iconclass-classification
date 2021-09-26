@@ -11,7 +11,7 @@ from pytorch_lightning.core.lightning import LightningModule
 import pytorch_lightning as pl
 from models.models import ModelsManager
 
-from models.resnet import ResNet50
+# from models.resnet import ResNet50
 
 from models.base_model import BaseModel
 from datasets.utils import read_jsonl
@@ -20,7 +20,7 @@ from models.loss import FocalBCEWithLogitsLoss
 
 from pytorch_lightning.core.decorators import auto_move_data
 
-from models.encoder import Encoder
+# from models.encoder import Encoder
 
 # from models.transformer import Transformer
 from models.position_encoding import PositionEmbeddingSine
@@ -301,7 +301,10 @@ class ConvnetTransformer(BaseModel):
             print(tgt_mask.shape)
             print(mask.shape)
             decoder_output = self.decoder.transformer(
-                src=image_embedding, src_key_padding_mask=~mask, tgt=query_embedding, tgt_mask=tgt_mask,
+                src=image_embedding,
+                src_key_padding_mask=~mask,
+                tgt=query_embedding,
+                tgt_mask=tgt_mask,
             )
             decoder_output = decoder_output.permute(1, 0, 2)
             prob = self.decoder.classifiers[level](decoder_output[:, level, :])
@@ -330,7 +333,10 @@ class ConvnetTransformer(BaseModel):
         # TODO detr only apply this on q and k
         # image_mask has to be inverted (zero -> content)
         decoder_output = self.transformer(
-            src=image_embedding, src_key_padding_mask=~mask, tgt=query_embedding, tgt_mask=tgt_mask,
+            src=image_embedding,
+            src_key_padding_mask=~mask,
+            tgt=query_embedding,
+            tgt_mask=tgt_mask,
         )
         # print(decoder_output.shape)
         decoder_output = decoder_output.permute(1, 0, 2)
@@ -486,7 +492,10 @@ class Decoder(nn.Module):
         image_embedding = image_embedding + pos_embedding  # TODO detr only apply this on q and k
         # image_mask has to be inverted (zero -> content)
         decoder_output = self.transformer(
-            src=image_embedding, src_key_padding_mask=~mask, tgt=query_embedding, tgt_mask=tgt_mask,
+            src=image_embedding,
+            src_key_padding_mask=~mask,
+            tgt=query_embedding,
+            tgt_mask=tgt_mask,
         )
         # print(decoder_output.shape)
         decoder_output = decoder_output.permute(1, 0, 2)

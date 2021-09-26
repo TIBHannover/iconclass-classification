@@ -21,22 +21,23 @@ import pytorch_lightning as pl
 from models.models import ModelsManager
 
 
+from encoders.clip import CLIP, convert_weights
 from models.base_model import BaseModel
+from models.utils import gen_filter_mask
 from datasets.utils import read_jsonl, read_jsonl_lb_mapping
 
 from models.loss import FocalBCEWithLogitsLoss
 
 from pytorch_lightning.core.decorators import auto_move_data
 
-from sklearn.metrics import fbeta_score
-
+from metrics import FBetaMetric, MAPMetric
+from metrics.utils import fbeta_cpu, map_cpu
 
 import pandas as pd
 import pickle
 
-from encoders.clip import CLIP, convert_weights
 
-@ModelsManager.export("convnet_clip_model")
+@ModelsManager.export("encoder_clip_decoder")
 class CLIPModel(BaseModel):
     def __init__(self, args=None, **kwargs):
         super(CLIPModel, self).__init__(args, **kwargs)
@@ -54,12 +55,12 @@ class CLIPModel(BaseModel):
         self.label_mapping_path = dict_args.get("label_mapping_path", None)
         self.clip_vit_path = dict_args.get("clip_vit_path", None)
         
-        self.text_embeddings_clip_path = dict_args.get("text_embeddings_clip_path", None)
-        if self.text_embeddings_clip_path is not None:
+        self.txt_embedding_file = dict_args.get("txt_embedding_file", None)
+        if self.txt_embedding_file is not None:
             with open(self.txt_embedding_file, "rb") as f:
                 self.txt_mapping = pickle.load(f)
                 self.txt_features = np.concatenate([x["clip"] for x in self.txt_mapping])
-        
+                self.txt_features = torch.from_numpy(self.txt_features)
         # self.outpath_f2_per_lbs = dict_args.get("outpath_f2_per_lbs", None)
 
         # self.use_diverse_beam_search = dict_args.get("use_diverse_beam_search", None)
@@ -76,28 +77,14 @@ class CLIPModel(BaseModel):
         # self.best_threshold = dict_args.get("best_threshold", None)
 
         self.mapping_config = []
-        self.mask_vec =[]
         if self.mapping_path is not None:
             self.mapping_config = read_jsonl(self.mapping_path)
-            for x in self.mapping_config:
-                    if x['count'] >self.filter_label_by_count:
-                        self.mask_vec.append(1)
-                    else:
-                        self.mask_vec.append(0)
+
+        self.filter_mask = torch.tensor(
+            gen_filter_mask(self.mapping_config, self.filter_label_by_count, key="count.flat"))
+
         
-        self.num_of_labels = torch.tensor(sum(self.mask_vec))
 
-        self.mapping_lut = {}
-        for m in self.mapping_config:
-
-            if len(m["parents"]) < 1:
-                p = None
-            else:
-                p = m["parents"][-1]
-
-            if p not in self.mapping_lut:
-                self.mapping_lut[p] = {}
-            self.mapping_lut[p][m["token_id_sequence"][-1]] = m["index"]
 
         self.classifier_config = {}
         if self.classifier_path is not None:
@@ -122,12 +109,6 @@ class CLIPModel(BaseModel):
         image_resolution = 224
         embed_dim = 512
         
-        # embed_dim = state_dict["text_projection"].shape[1]
-        # context_length = state_dict["positional_embedding"].shape[0]
-        # vocab_size = state_dict["token_embedding.weight"].shape[0]
-        # transformer_width = state_dict["ln_final.weight"].shape[0]
-        # transformer_heads = transformer_width // 64
-        # transformer_layers = len(set(k.split(".")[2] for k in state_dict if k.startswith(f"transformer.resblocks")))
         
         context_length=77
         vocab_size=49408
@@ -152,49 +133,20 @@ class CLIPModel(BaseModel):
                 
         self.loss_img = nn.CrossEntropyLoss()
         self.loss_txt = nn.CrossEntropyLoss()
-        # self.optimizer = torch.optim.Adam(self.net.parameters(), lr=5e-5,betas=(0.9,0.98),eps=1e-6,weight_decay=0.2)
+
+        self.loss = torch.nn.BCEWithLogitsLoss(reduction="none")
+        # self.fbeta = FBetaMetric(num_classes=len(self.mapping_config))
+        # self.map = MAPMetric(num_classes=len(self.mapping_config))
         
-        # self.vocabulary_size = [len(x["tokenizer"]) for x in self.classifier_config]  # get from tockenizer
-        # self.max_vocab_size = max(self.vocabulary_size)
-        # self.embedding_dim = 768#256
-        # self.attention_dim = 128
-        # self.embedding_dim = 256
-        # self.max_vocab_size = max(self.vocabulary_size)
-        # self.encoder = Encoder(args, embedding_dim=self.embedding_dim, flatten_embedding=True)
-        # self.encoder = Encoder(args, embedding_dim=None,flatten_embedding=False )
-        # self.decoder = Decoder(
-        #     self.vocabulary_size, self.embedding_dim, self.attention_dim, self.embedding_dim, self.max_vocab_size
-        # )
-
-        # if self.using_weights:
-        #     logging.info("Using weighting for loss")
-
-            # for x in self.mapping_config:
-            # self.weights[0, x["class_id"]] = x["weight"]
-            # self.weights = [x["weight_pos"] for x in self.mapping_config]
-            # self.weights = torch.Tensor(self.weights)
-        # else:
-        #     self.weights = torch.ones(len(self.mapping_config))
-        # print(self.weights)
-        # if self.use_focal_loss:
-        #     self.loss = FocalBCEWithLogitsLoss(
-        #         reduction="none", gamma=self.focal_loss_gamma, alpha=self.focal_loss_alpha
-        #     )
-        # else:
-        #     self.loss = torch.nn.BCEWithLogitsLoss(reduction="none", pos_weight=self.weights)
-
-        # self.all_predictions = []
-        # self.all_targets = []
-        # self.all_losses = []
-
+   
     def forward(self, x):
         return x
 
-    def training_step(self, batch, batch_idx):
+    def training_step(self, batch, batch_idx): #TODO modify the train/validation code to the new version iconclass_all
         image = batch["image"]
         description = batch["token_lb"]
         
-        print(image.shape)
+        # print("***")
         # print("var - {}, mean - {}".format(torch.var(image), torch.mean(image)))
         
         logits_per_image, logits_per_text = self.net(image, description)
@@ -228,7 +180,7 @@ class CLIPModel(BaseModel):
         #         self.logger.experiment.add_histogram(f"train/target_{i}", target, self.global_step)
 
         return {"loss": ll}
-    def validation_step(self, batch, batch_idx):
+    def validation_step(self, batch, batch_idx):  #TODO modify the train/validation code to the new version iconclass_all
         image = batch["image"]
         description = batch["token_lb"]
  
@@ -258,29 +210,46 @@ class CLIPModel(BaseModel):
         self.log("val/loss", loss / count, prog_bar=True)
         self.log("val/acc", acc / count, prog_bar=True)
     
+    def on_test_epoch_start(self):
+        self.all_predictions = []
+        self.all_targets = []
+
+    
     def test_step(self, batch, batch_idx):
         image = batch["image"]
-        description = batch["token_lb"]
+        target = batch["yolo_target"]
+        classes_mask = batch["yolo_target_mask"]
+        
         
         image_features = self.net.encode_image(image)
         # text_features = self.net.encode_text(description)
         # normalized features
         image_features = image_features / image_features.norm(dim=-1, keepdim=True)
         # text_features = text_features / text_features.norm(dim=-1, keepdim=True)
-        text_probs = (100.0 * image_features @ self.text_features.T).softmax(dim=-1)
+        text_features = self.txt_features.to(image_features.device)
+        text_probs = (100.0 * image_features @ text_features.T).softmax(dim=-1)
         
-        # logits_per_image, logits_per_text = self.net(image, description)
+        # self.fbeta(text_probs, target) # metric may cause memory error
+        # self.map(text_probs, target)
         
-        # ground_truth = torch.arange(len(logits_per_image)).type_as(
-        #     logits_per_image).long().to(image.device.index)
+        tt = target.detach().cpu().numpy()
+        pp = text_probs.detach().cpu().numpy()
+        # pp = flat_prediction_norm.detach().cpu().numpy()
+        # ll = total_loss.detach().cpu().numpy()
+
+        self.all_targets.append(tt)
+        self.all_predictions.append(pp)
+        # self.all_losses.append(ll)
+
+
         
-        # loss = (self.loss_img(logits_per_image,ground_truth) + 
-        #               self.loss_txt(logits_per_text,ground_truth)).div(2)
         
-        # acc_i = (torch.argmax(logits_per_image, 1) == ground_truth).sum()
-        # acc_t = (torch.argmax(logits_per_text, 0) == ground_truth).sum()
+        filter_mask = self.filter_mask.to(image_features.device)
         
-        # return {"loss": loss, "acc": (acc_i+acc_t)/2/image.shape[0]}
+        loss= self.loss(text_probs, target)*filter_mask * classes_mask
+        return {"loss": torch.mean(loss)}
+
+        
     
     def test_epoch_end(self, outputs):
 
@@ -289,12 +258,26 @@ class CLIPModel(BaseModel):
         count = 0
         for output in outputs:
             loss += output["loss"]
-            acc += output["acc"]
+            # acc += output["acc"]
             count += 1
             
-        self.log("val/loss", loss / count, prog_bar=True)
-        self.log("val/acc", acc / count, prog_bar=True)
-    
+        self.log("test/loss", loss / count, prog_bar=True)
+        # self.log("val/acc", acc / count, prog_bar=True)
+        
+        filter_mask = self.filter_mask
+        self.log("test/filter", torch.sum(filter_mask))
+
+        logging.info("EncoderCLIPDecoder::test_epoch_end -> fbeta")
+        fbeta = fbeta_cpu(self.all_predictions,self.all_targets,
+                          len(self.mapping_config), mask = filter_mask)
+        for thres, value in fbeta.items():
+            self.log(f"test/fbeta-{thres}", value)
+
+        logging.info("EncoderCLIPDecoder::test_epoch_end -> map")
+        map_score = map_cpu(self.all_targets, self.all_predictions, mask =filter_mask.numpy() )
+        logging.info(f"MAP score: {map_score}")
+        self.log(f"test/map", map_score, prog_bar=True)
+
     
     @classmethod
     def add_args(cls, parent_parser):
@@ -308,7 +291,7 @@ class CLIPModel(BaseModel):
         parser.add_argument("--label_mapping_path", type=str)
         parser.add_argument("--clip_vit_path", type=str)
         parser.add_argument("--outpath_f2_per_lbs", type=str)
-        parser.add_argument("--text_embeddings_clip_path", type=str)
+        parser.add_argument("--txt_embedding_file", type=str)
         
         
         parser.add_argument("--use_diverse_beam_search", action="store_true", default=False)

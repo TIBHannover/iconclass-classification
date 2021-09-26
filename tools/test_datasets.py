@@ -30,10 +30,10 @@ def parse_args():
 
     parser.add_argument("-v", "--verbose", action="store_true", help="verbose output")
 
-    parser.add_argument("--output_path", required=True, help="verbose output")
-    parser.add_argument("--input_mapping_path", required=True, help="verbose output")
+    # parser.add_argument("--output_path", required=True, help="verbose output")
+    # parser.add_argument("--input_mapping_path", required=True, help="verbose output")
 
-    parser.add_argument("--filter_label_by_count", required=True, type=int, help="verbose output")
+    # parser.add_argument("--filter_label_by_count", required=True, type=int, help="verbose output")
 
     parser = DatasetsManager.add_args(parser)
 
@@ -53,17 +53,21 @@ def main():
 
     dataset = DatasetsManager().build_dataset(name=args.dataset, args=args)
 
-    mapping_list = read_jsonl(args.input_mapping_path)
-    print(mapping_list[100])
-    filtered_lbs_inds = []
-    for ind, x in enumerate(mapping_list):
-        if x["count"] < args.filter_label_by_count:
-            filtered_lbs_inds.append(ind)
+    # mapping_list = read_jsonl(args.input_mapping_path)
+    # print(mapping_list[100])
+    # filtered_lbs_inds = []
+    # for ind, x in enumerate(mapping_list):
+    # if x["count"] < args.filter_label_by_count:
+    # filtered_lbs_inds.append(ind)
+
+    for d in dataset.train():
+        print(d)
+        exit()
 
     with open(args.output_path, "w") as f:
         label_sum = None
         count = 0
-        for i, d in enumerate(dataset.train()):
+        for d in dataset.train():
             # print(d.keys())
             d_filtered = np.delete(d["ids_vec"], filtered_lbs_inds, axis=1)
             count += d_filtered.shape[0]
@@ -78,9 +82,6 @@ def main():
             weights = count / (label_sum.shape[1] * label_sum)
 
             max_weights = np.amax(np.asarray(weights))
-
-            if i % 1000 == 0:
-                print(f"{i} {count} {max_value} {max_weights} {label_sum.shape}")
             # max_weights =
             # print(f"{label_sum[:6]} {weights[:6]} {max_value} {max_weights}")
             # print(d)

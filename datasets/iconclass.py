@@ -149,7 +149,18 @@ class IconclassDataloader:
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             drop_last=True,
-            collate_fn=PadCollate(pad_values={"image": 0.0, "image_mask": False, "parents": "#PAD", "txt_labels": ""}),
+            collate_fn=PadCollate(
+                pad_values={
+                    "image": 0.0,
+                    "image_mask": False,
+                    "parents": "#PAD",
+                    "ontology_mask": 0,
+                    "ontology_target": 0,
+                    "ontology_ranges": 0,
+                    "ontology_trace_mask": 0,
+                    "ontology_indexes": -1,
+                }
+            ),
         )
         return dataloader
 
@@ -191,24 +202,55 @@ class IconclassDataloader:
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             drop_last=True,
-            collate_fn=PadCollate(pad_values={"image": 0.0, "image_mask": False, "parents": "#PAD"}),
+            collate_fn=PadCollate(
+                pad_values={
+                    "image": 0.0,
+                    "image_mask": False,
+                    "parents": "#PAD",
+                    "ontology_mask": 0,
+                    "ontology_target": 0,
+                    "ontology_ranges": 0,
+                    "ontology_trace_mask": 0,
+                    "ontology_indexes": -1,
+                }
+            ),
         )
         return dataloader
 
     def test_image_pipeline(self):
-        transforms = torchvision.transforms.Compose(
-            [
-                torchvision.transforms.ToPILImage(),
-                RandomResize([self.test_size], max_size=self.max_size),
-                torchvision.transforms.ToTensor(),
-                torchvision.transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+        # transforms = torchvision.transforms.Compose(
+        #     [
+        #         torchvision.transforms.ToPILImage(),
+        #         RandomResize([self.test_size], max_size=self.max_size),
+        #         torchvision.transforms.ToTensor(),
+        #         torchvision.transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+        #     ]
+        # )
+        # return ImagePreprocessingPipeline(
+        #     transforms,
+        #     min_size=self.val_filter_min_dim,
+        # )
+        
+        pipeline = [torchvision.transforms.ToPILImage(), RandomResize([self.test_size], max_size=self.max_size)]
+
+        if self.use_center_crop:
+            pipeline += [
+                torchvision.transforms.Resize(self.test_size, interpolation=Image.BICUBIC),
+                torchvision.transforms.CenterCrop(self.test_size),
             ]
-        )
+
+        pipeline += [
+            torchvision.transforms.ToTensor(),
+            torchvision.transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+        ]
+        transforms = torchvision.transforms.Compose(pipeline)
         return ImagePreprocessingPipeline(
             transforms,
             min_size=self.val_filter_min_dim,
         )
 
+        
+        
     def test_decode_pieline(self):
         return SequencePipeline(
             [

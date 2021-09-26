@@ -9,6 +9,11 @@ import torchvision
 
 from pytorch_lightning.utilities.distributed import rank_zero_only
 
+try:
+    import wandb
+except:
+    pass
+
 
 class ProgressPrinter(pl.callbacks.ProgressBarBase):
     def __init__(self, refresh_rate: int = 100):
@@ -108,9 +113,9 @@ class ModelCheckpoint(pl.callbacks.ModelCheckpoint):
 
 
 class LogModelWeightCallback(pl.callbacks.Callback):
-    def __init__(self, flush_logs_every_n_steps=None, nrow=2, **kwargs):
+    def __init__(self, log_every_n_steps=None, nrow=2, **kwargs):
         super(LogModelWeightCallback, self).__init__(**kwargs)
-        self.flush_logs_every_n_steps = flush_logs_every_n_steps
+        self.log_every_n_steps = log_every_n_steps
         self.nrow = nrow
 
     @rank_zero_only
@@ -118,10 +123,10 @@ class LogModelWeightCallback(pl.callbacks.Callback):
         if trainer.logger is None:
             return
 
-        if self.flush_logs_every_n_steps is None:
-            log_interval = trainer.flush_logs_every_n_steps
+        if self.log_every_n_steps is None:
+            log_interval = trainer.log_every_n_steps
         else:
-            log_interval = self.flush_logs_every_n_steps
+            log_interval = self.log_every_n_steps
 
         if (trainer.global_step + 1) % log_interval == 0:
             for k, v in pl_module.state_dict().items():
@@ -131,10 +136,10 @@ class LogModelWeightCallback(pl.callbacks.Callback):
                     logging.info(f"LogModelWeightCallback: {e}")
 
 
-class LogImageCallback(pl.callbacks.Callback):
-    def __init__(self, flush_logs_every_n_steps=None, nrow=2, **kwargs):
-        super(LogImageCallback, self).__init__(**kwargs)
-        self.flush_logs_every_n_steps = flush_logs_every_n_steps
+class TensorBoardLogImageCallback(pl.callbacks.Callback):
+    def __init__(self, log_every_n_steps=None, nrow=2, **kwargs):
+        super(TensorBoardLogImageCallback, self).__init__(**kwargs)
+        self.log_every_n_steps = log_every_n_steps
         self.nrow = nrow
 
     @rank_zero_only
@@ -144,18 +149,54 @@ class LogImageCallback(pl.callbacks.Callback):
         if trainer.logger is None:
             return
 
-        if self.flush_logs_every_n_steps is None:
-            log_interval = trainer.flush_logs_every_n_steps
+        if not hasattr(trainer.logger.experiment, "add_histogram"):
+            logging.warning(f"TensorBoardLogImageCallback: No TensorBoardLogger detected")
+            return
+
+        if not hasattr(trainer.logger.experiment, "add_image"):
+            logging.warning(f"TensorBoardLogImageCallback: No TensorBoardLogger detected")
+            return
+
+        if self.log_every_n_steps is None:
+            log_interval = trainer.log_every_n_steps
         else:
-            log_interval = self.flush_logs_every_n_steps
+            log_interval = self.log_every_n_steps
 
         if (trainer.global_step + 1) % log_interval == 0:
 
-            if hasattr(pl_module, "image"):
-                grid = torchvision.utils.make_grid(pl_module.image, normalize=True, nrow=self.nrow)
-                trainer.logger.experiment.add_image(f"input/image", grid, trainer.global_step + 1)
-                try:
-                    trainer.logger.experiment.add_histogram(f"input/dist", pl_module.image, trainer.global_step + 1)
-                except ValueError as e:
-                    logging.info(f"LogImageCallback (source/dist): {e}")
+            grid = torchvision.utils.make_grid(pl_module.image, normalize=True, nrow=self.nrow)
+            trainer.logger.experiment.add_image(f"input/image", grid, trainer.global_step + 1)
+            try:
+                trainer.logger.experiment.add_histogram(f"input/dist", pl_module.image, trainer.global_step + 1)
+            except ValueError as e:
+                logging.warning(f"TensorBoardLogImageCallback (source/dist): {e}")
 
+
+class WandbLogImageCallback(pl.callbacks.Callback):
+    def __init__(self, log_every_n_steps=None, nrow=2, **kwargs):
+        super(WandbLogImageCallback, self).__init__(**kwargs)
+        self.log_every_n_steps = log_every_n_steps
+        self.nrow = nrow
+
+    @rank_zero_only
+    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx):
+        super().on_train_batch_end(trainer, pl_module, outputs, batch, batch_idx, dataloader_idx)
+
+        if trainer.logger is None:
+            return
+
+        if self.log_every_n_steps is None:
+            log_interval = trainer.log_every_n_steps
+        else:
+            log_interval = self.log_every_n_steps
+
+        if (trainer.global_step + 1) % log_interval == 0:
+
+            grid = torchvision.utils.make_grid(pl_module.image, normalize=True, nrow=self.nrow)
+
+            trainer.logger.experiment.log(
+                {
+                    "val/examples": [wandb.Image(grid, caption="Input images")],
+                    "global_step": trainer.global_step + 1,
+                }
+            )

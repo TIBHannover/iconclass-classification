@@ -26,7 +26,8 @@ from datasets.utils import read_jsonl
 
 from datasets.iconclass import IconclassDataloader
 from tools import tokenizer_clip 
-
+     
+            
 class IconclassCLIPDecoderPipeline(Pipeline):
     def __init__(self, tokenizer=None,mapping=None, classifier=None, labels=None):
         self.mapping = mapping
@@ -116,4 +117,5 @@ class IconclassCLIPDataloader(IconclassDataloader):
         parser.add_argument("--classifier_path", type=str)
         parser.add_argument("--filter_label_by_count", type=int, default=0)
         parser.add_argument("--label_path", type=str)
+        parser.add_argument("--bpe_vocab_path", type=str)
         return parser

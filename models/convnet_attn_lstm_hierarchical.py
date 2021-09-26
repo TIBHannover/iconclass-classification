@@ -29,12 +29,13 @@ from models.loss import FocalBCEWithLogitsLoss
 
 from pytorch_lightning.core.decorators import auto_move_data
 
-from models.encoder import Encoder
+# from models.encoder import Encoder
 from sklearn.metrics import fbeta_score
 
 
 import pandas as pd
 import pickle
+
 
 @ModelsManager.export("convnet_attn_lstm_hierarchical")
 class ConvnetAttnLstm(BaseModel):
@@ -68,15 +69,15 @@ class ConvnetAttnLstm(BaseModel):
         self.best_threshold = dict_args.get("best_threshold", None)
 
         self.mapping_config = []
-        self.mask_vec =[]
+        self.mask_vec = []
         if self.mapping_path is not None:
             self.mapping_config = read_jsonl(self.mapping_path)
             for x in self.mapping_config:
-                    if x['count'] >self.filter_label_by_count:
-                        self.mask_vec.append(1)
-                    else:
-                        self.mask_vec.append(0)
-        
+                if x["count"] > self.filter_label_by_count:
+                    self.mask_vec.append(1)
+                else:
+                    self.mask_vec.append(0)
+
         self.num_of_labels = torch.tensor(sum(self.mask_vec))
 
         self.mapping_lut = {}
@@ -159,7 +160,7 @@ class ConvnetAttnLstm(BaseModel):
         # image = F.interpolate(image, size = (299,299), mode= 'bicubic', align_corners=False)
         # forward image
         image_embedding = self.encoder(image)
-        if len(image_embedding[0].shape) ==2:
+        if len(image_embedding[0].shape) == 2:
             image_embedding = [torch.unsqueeze(image_embedding[0], 1)]
 
         image_embedding = torch.cat(image_embedding, dim=1)
@@ -196,23 +197,22 @@ class ConvnetAttnLstm(BaseModel):
             loss += torch.mean(self.loss(predictions, target[i_lev]))
             decoder_inp = source[i_lev]
             # decoder_inp = torch.tensor(target[i_lev]).to(torch.int64).to(image.device.index)
-        
 
         # if self.use_label_smoothing:
         #     targets_smooth = flat_target.float() * (1 - self.LABEL_SMOOTHING_factor) + 0.5 * self.LABEL_SMOOTHING_factor
         # else:
         #     targets_smooth = flat_target
         # lloss = self.loss(flat_prediction, targets_smooth)*torch.Tensor(self.mask_vec).to(image.device.index)
-        lloss= loss / len(self.levels)
-        return {"loss": lloss}
 
+        lloss = loss / len(target)
+        return {"loss": lloss}
 
     def training_step_end(self, outputs):
 
         # ll = torch.mean(outputs["loss"])*(outputs["loss"].shape[1])/(
         #     self.num_of_labels.to(outputs["loss"].device.index))
         ll = torch.mean(outputs["loss"])
-        self.log("train/loss",ll , prog_bar=True)
+        self.log("train/loss", ll, prog_bar=True)
         # if (self.global_step % self.trainer.log_every_n_steps) == 0:
         #     for i, (pred, target) in enumerate(zip(outputs["predictions"], outputs["targets"])):
         #         self.logger.experiment.add_histogram(f"train/predict_{i}", pred, self.global_step)
@@ -230,9 +230,8 @@ class ConvnetAttnLstm(BaseModel):
         # forward image
         image_embedding = self.encoder(image)
         # print(image_embedding[0].shape)
-        if len(image_embedding[0].shape) ==2:
+        if len(image_embedding[0].shape) == 2:
             image_embedding = [torch.unsqueeze(image_embedding[0], 1)]
-
 
         image_embedding = torch.cat(image_embedding, dim=1)
 
@@ -291,24 +290,30 @@ class ConvnetAttnLstm(BaseModel):
 
             total_loss_h = loss / len(self.levels)
             temp_loss = self.loss(flat_prediction, flat_target)
-            total_loss = torch.mean(self.loss(flat_prediction, flat_target))# *
-                                   #torch.Tensor(self.mask_vec).to(image.device.index)
-                                    #)*flat_target.shape[1]/self.num_of_labels.to(image.device.index)
+            total_loss = torch.mean(self.loss(flat_prediction, flat_target))  # *
+            # torch.Tensor(self.mask_vec).to(image.device.index)
+            # )*flat_target.shape[1]/self.num_of_labels.to(image.device.index)
 
             tt = flat_target.detach().cpu().numpy()
             pp = flat_prediction.detach().cpu().numpy()
             # pp = flat_prediction_norm.detach().cpu().numpy()
             ll = total_loss.detach().cpu().numpy()
-            # with open('pickletest.pkl', 'wb') as f:
-            #     pickle.dump([flat_prediction.detach().cpu().numpy(),flat_target.detach().cpu().numpy(),temp_loss.detach().cpu().numpy() ], f)
-            
+
+            # with open("pickletest.pkl", "wb") as f:
+            #     pickle.dump(
+            #         [
+            #             flat_prediction.detach().cpu().numpy(),
+            #             flat_target.detach().cpu().numpy(),
+            #             temp_loss.detach().cpu().numpy(),
+            #         ],
+            #         f,
+            #     )
+
             self.all_targets.append(tt)
             self.all_predictions.append(pp)
             self.all_losses.append(ll)
 
-        return {
-            "loss": total_loss, "loss_h":total_loss_h
-        }
+        return {"loss": total_loss, "loss_h": total_loss_h}
 
     def map_level_prediction(self, parents):
         target_indexes = []
@@ -351,7 +356,7 @@ class ConvnetAttnLstm(BaseModel):
         for output in outputs:
             loss += output["loss"]
             count += 1
-            loss_h+=output["loss_h"]
+            loss_h += output["loss_h"]
         # # f1score prediction
         # f1_score = self.f1_val.compute().cpu().detach()
         # self.log("val/f1", np.nanmean(f1_score), prog_bar=True)

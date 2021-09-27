@@ -6,7 +6,7 @@ import torchvision
 
 from PIL import Image
 
-from datasets.image_pipeline import ImagePreprocessingPipeline, ImageDecodePreprocessingPipeline, RandomResize
+from datasets.image_pipeline import IconclassImagePreprocessingPipeline, ImageDecodePipeline, RandomResize
 from datasets.datasets import DatasetsManager
 from datasets.pipeline import (
     Pipeline,
@@ -124,7 +124,7 @@ class IconclassDataloader:
             torchvision.transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
         ]
         transforms = torchvision.transforms.Compose(pipeline)
-        return ImagePreprocessingPipeline(
+        return IconclassImagePreprocessingPipeline(
             transforms, min_size=self.train_filter_min_dim, sample_additional=self.train_sample_additional
         )
 
@@ -178,7 +178,7 @@ class IconclassDataloader:
             torchvision.transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
         ]
         transforms = torchvision.transforms.Compose(pipeline)
-        return ImagePreprocessingPipeline(
+        return IconclassImagePreprocessingPipeline(
             transforms,
             min_size=self.val_filter_min_dim,
         )
@@ -238,13 +238,13 @@ class IconclassDataloader:
                 torchvision.transforms.Resize(self.test_size, interpolation=Image.BICUBIC),
                 torchvision.transforms.CenterCrop(self.test_size),
             ]
-
+            
         pipeline += [
             torchvision.transforms.ToTensor(),
             torchvision.transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
         ]
         transforms = torchvision.transforms.Compose(pipeline)
-        return ImagePreprocessingPipeline(
+        return IconclassImagePreprocessingPipeline(
             transforms,
             min_size=self.val_filter_min_dim,
         )
@@ -285,7 +285,7 @@ class IconclassDataloader:
                 torchvision.transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
             ]
         )
-        return ImageDecodePreprocessingPipeline(transforms)
+        return ImageDecodePipeline(transforms)
 
     def infer(self):
 

@@ -4,3 +4,4 @@ import datasets.iconclass_flatten
 import datasets.iconclass_yolo_flatten
 import datasets.iconclass_clip
 import datasets.iconclass_all
+import datasets.coco_all

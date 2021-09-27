@@ -77,9 +77,12 @@ class EncoderHierarchicalDecoder(BaseModel):
         if self.ontology_path is not None:
             self.ontology = read_jsonl(self.ontology_path)
 
-        self.filter_mask = torch.tensor(
-            gen_filter_mask(self.mapping_config, self.filter_label_by_count, key="count.flat")
-        )
+        if self.filter_label_by_count is not None:
+            self.filter_mask = torch.tensor(
+                gen_filter_mask(self.mapping_config, self.filter_label_by_count, key="count.flat")
+            )
+        else:
+            self.filter_mask = torch.ones(len(self.mapping_config), dtype=torch.float32)
 
         self.num_of_labels = torch.tensor(sum(self.mask_vec))
 
@@ -100,7 +103,7 @@ class EncoderHierarchicalDecoder(BaseModel):
         #     self.weights = [x['weight'] for x in self.mapping_config]
         #     self.weights = np.array(self.weights)
 
-        self.encoder = EncodersManager().build_encoder(name=args.encoder, args=args, out_features=256)
+        self.encoder = EncodersManager().build_encoder(name=args.encoder, args=args)
         self.decoder = DecodersManager().build_decoder(
             name=args.decoder,
             args=args,
@@ -125,7 +128,6 @@ class EncoderHierarchicalDecoder(BaseModel):
             )
         else:
             self.loss = torch.nn.BCEWithLogitsLoss(reduction="none")
-
         self.fbeta = FBetaMetric(num_classes=len(self.mapping_config))
         self.map = MAPMetric(num_classes=len(self.mapping_config))
 
@@ -252,11 +254,9 @@ class EncoderHierarchicalDecoder(BaseModel):
         loss = torch.mean(torch.stack(losses))
 
         decoder_without_tokens = utils.del_sequence_tokens_from_level_ontology(decoder_result)
-        flat_prediction = utils.map_to_flat_ontology(decoder_without_tokens, batch["ontology_levels"])
 
-        if hasattr(self.logger.experiment, "add_histogram"):
-            self.logger.experiment.add_histogram(f"val/logits", flat_prediction, self.global_step)
-            self.logger.experiment.add_histogram(f"val/target", flat_target, self.global_step)
+        # flat output (similar to yolo)
+        flat_prediction = utils.map_to_flat_ontology(decoder_without_tokens, batch["ontology_levels"])
 
         # delete empty traces
         # TODO Javad maybe we can merge all traces in one vector
@@ -264,11 +264,12 @@ class EncoderHierarchicalDecoder(BaseModel):
             trace_flat_prediction = torch.sigmoid(flat_prediction)[trace_mask == 1, ...]
             trace_flat_target = flat_target[trace_mask == 1, ...]
 
-            # print("##############################")
-            # print(trace_flat_prediction[:5, :20])
-            # print(trace_flat_target[:5, :20])
-            # else:
-            trace_flat_prediction = torch.sum(torch.sigmoid(flat_prediction).reshape(target.shape), dim=1)
+            trace_flat_prediction = torch.sigmoid(flat_prediction).reshape(target.shape)
+            trace_flat_prediction = torch.sum(trace_flat_prediction * batch["ontology_mask"], dim=1)
+
+            a = trace_flat_prediction
+            b = torch.sum(batch["ontology_mask"], dim=1)
+
             trace_flat_prediction /= torch.sum(batch["ontology_mask"], dim=1)
             trace_flat_prediction[torch.isnan(trace_flat_prediction)] = 0
             trace_flat_prediction[torch.isinf(trace_flat_prediction)] = 0
@@ -278,7 +279,6 @@ class EncoderHierarchicalDecoder(BaseModel):
 
             # print(trace_flat_prediction[0, :20])
             # print(trace_flat_target[0, :20])
-
         self.fbeta(trace_flat_prediction, trace_flat_target)
         self.map(trace_flat_prediction, trace_flat_target)
 
@@ -301,7 +301,7 @@ class EncoderHierarchicalDecoder(BaseModel):
         logging.info("EncoderHierarchicalDecoder::validation_epoch_end -> fbeta")
         fbeta = self.fbeta.compute()
         for thres, value in fbeta.items():
-            self.log(f"val/fbeta-{thres}", value)
+            self.log(f"val/fbeta-{thres}", self.fbeta.mean(value, filter_mask))
 
         logging.info("EncoderHierarchicalDecoder::validation_epoch_end -> map")
         ap_scores_per_class = self.map.compute()
@@ -336,7 +336,7 @@ class EncoderHierarchicalDecoder(BaseModel):
         parser.add_argument("--focal_loss_gamma", type=float, default=2)
         parser.add_argument("--focal_loss_alpha", type=float, default=0.25)
 
-        parser.add_argument("--filter_label_by_count", type=int, default=0)
+        parser.add_argument("--filter_label_by_count", type=int, default=None)
         parser.add_argument("--output_method", choices=["global", "level", "minimal"], default="level")
 
         parser.add_argument("--best_threshold", nargs="+", type=float, default=[0.2])

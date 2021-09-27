@@ -8,7 +8,7 @@ import torch
 import torchvision
 import imageio
 
-from datasets.image_pipeline import ImagePreprocessingPipeline
+# from datasets.image_pipeline import ImagePreprocessingPipeline
 from datasets.datasets import DatasetsManager
 from datasets.pipeline import (
     Pipeline,

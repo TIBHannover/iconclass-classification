@@ -54,7 +54,7 @@ class BaseModel(LightningModule):
 
         parser.add_argument("--sched_type", choices=["cosine", "exponetial", "step"])
 
-        parser.add_argument("--lr_rampup", default=10000, type=int)
+        parser.add_argument("--lr_rampup", default=2000, type=int)
         parser.add_argument("--lr_init", default=0.0, type=float)
         parser.add_argument("--lr_rampdown", default=60000, type=int)
 

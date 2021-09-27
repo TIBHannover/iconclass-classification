@@ -32,7 +32,7 @@ import pandas as pd
 import pickle
 
 from metrics import FBetaMetric, MAPMetric
-from metrics.utils import fbeta_cpu, map_cpu
+# from metrics.utils import fbeta_cpu, map_cpu
 
 @ModelsManager.export("encoder_flat_decoder")
 class EncoderFlatDecoder(BaseModel):
@@ -67,9 +67,12 @@ class EncoderFlatDecoder(BaseModel):
         if self.mapping_path is not None:
             self.mapping_config = read_jsonl(self.mapping_path)
 
-        self.filter_mask = torch.tensor(
-            gen_filter_mask(self.mapping_config, self.filter_label_by_count, key="count.flat")
-        )
+        if self.filter_label_by_count is not None:
+            self.filter_mask = torch.tensor(
+                gen_filter_mask(self.mapping_config, self.filter_label_by_count, key="count.flat")
+            )
+        else:
+            self.filter_mask = torch.ones(len(self.mapping_config), dtype=torch.float32)
 
         self.num_of_labels = torch.tensor(sum(self.mask_vec))
 
@@ -102,8 +105,8 @@ class EncoderFlatDecoder(BaseModel):
         else:
             self.loss = torch.nn.BCEWithLogitsLoss(reduction="none", pos_weight=self.weights)
 
-        # self.fbeta = FBetaMetric(num_classes=len(self.mapping_config))
-        # self.map = MAPMetric(num_classes=len(self.mapping_config))
+        self.fbeta = FBetaMetric(num_classes=len(self.mapping_config))
+        self.map = MAPMetric(num_classes=len(self.mapping_config))
 
     def forward(self, x):
         return x
@@ -132,9 +135,9 @@ class EncoderFlatDecoder(BaseModel):
         self.log("train/loss", torch.sum(loss) / torch.sum(filter_mask))
         return {"loss": torch.mean(loss)}
 
-    def on_validation_epoch_start(self):
-        self.all_predictions = []
-        self.all_targets = []
+    # def on_validation_epoch_start(self):
+    #     self.all_predictions = []
+    #     self.all_targets = []
 
     def validation_step(self, batch, batch_idx):
         image = batch["image"]
@@ -153,18 +156,15 @@ class EncoderFlatDecoder(BaseModel):
         filter_mask = self.filter_mask.to(decoder_result.device)
         loss = self.loss(decoder_result, target) * weights * filter_mask  # * self.weights
 
-        if hasattr(self.logger.experiment, "add_histogram"):
-            self.logger.experiment.add_histogram(f"val/logits", logits, self.global_step)
-            self.logger.experiment.add_histogram(f"val/target", target, self.global_step)
-
-        # self.fbeta(torch.sigmoid(logits), target)
-        # self.map(torch.sigmoid(logits), target)
+        self.fbeta(torch.sigmoid(logits), target)
+        self.map(torch.sigmoid(logits), target)
  
-        tt = target.detach().cpu().numpy()
-        pp = torch.sigmoid(logits).detach().cpu().numpy()
+        # tt = target.detach().cpu().numpy()
+        # pp = torch.sigmoid(logits).detach().cpu().numpy()
 
-        self.all_targets.append(tt)
-        self.all_predictions.append(pp)
+        # self.all_targets.append(tt)
+        # self.all_predictions.append(pp)
+
 
         return {"loss": torch.sum(loss) / torch.sum(filter_mask)}
 
@@ -183,21 +183,21 @@ class EncoderFlatDecoder(BaseModel):
         self.log("val/filter", torch.sum(filter_mask))
 
         logging.info("EncoderFlatDecoder::validation_epoch_end -> fbeta")
-        # fbeta = self.fbeta.compute()
-        fbeta = fbeta_cpu(self.all_predictions,self.all_targets,
-                          len(self.mapping_config), mask = filter_mask)
+        fbeta = self.fbeta.compute()
+        # fbeta = fbeta_cpu(self.all_predictions,self.all_targets,
+        #                   len(self.mapping_config), mask = filter_mask)
         for thres, value in fbeta.items():
-            self.log(f"val/fbeta-{thres}", value)
+            self.log(f"val/fbeta-{thres}", self.fbeta.mean(value, filter_mask))
 
         logging.info("EncoderFlatDecoder::validation_epoch_end -> map")
-        # ap_scores_per_class = self.map.compute()
-        # map_score = self.map.mean(ap_scores_per_class, filter_mask)
-        map_score = map_cpu(self.all_targets, self.all_predictions, mask =filter_mask.numpy() )
+        ap_scores_per_class = self.map.compute()
+        map_score = self.map.mean(ap_scores_per_class, filter_mask)
+        # map_score = map_cpu(self.all_targets, self.all_predictions, mask =filter_mask.numpy() )
         logging.info(f"MAP score: {map_score}")
         self.log(f"val/map", map_score, prog_bar=True)
 
-        # self.fbeta.reset()
-        # self.map.reset()
+        self.fbeta.reset()
+        self.map.reset()
 
     @classmethod
     def add_args(cls, parent_parser):
@@ -220,7 +220,7 @@ class EncoderFlatDecoder(BaseModel):
         parser.add_argument("--focal_loss_gamma", type=float, default=2)
         parser.add_argument("--focal_loss_alpha", type=float, default=0.25)
 
-        parser.add_argument("--filter_label_by_count", type=int, default=0)
+        parser.add_argument("--filter_label_by_count", type=int, default=None)
 
         parser.add_argument("--best_threshold", nargs="+", type=float, default=[0.2])
         return parser

@@ -4,16 +4,40 @@ import random
 
 import numpy as np
 import torch
+import torchvision
+
+
+from PIL import Image
 
 from datasets.datasets import DatasetsManager
 from datasets.pipeline import (
     Pipeline,
     MapDataset,
 )
+
 from datasets.utils import read_jsonl
-from datasets.iconclass import IconclassDataloader
 
 # from models.utils import build_level_map
+from datasets.image_pipeline import (
+    CocoImageTrainPreprocessingPipeline,
+    ImageDecodePipeline,
+    RandomResize,
+    CocoImageTestPreprocessingPipeline,
+)
+from datasets.datasets import DatasetsManager
+from datasets.pipeline import (
+    Pipeline,
+    MapDataset,
+    MsgPackPipeline,
+    SequencePipeline,
+    ConcatShufflePipeline,
+    ConcatPipeline,
+    DummyPipeline,
+    ImagePipeline,
+    split_chunk_by_nodes,
+    split_chunk_by_workers,
+)
+from datasets.pad_collate import PadCollate
 
 
 def build_level_map(mapping):
@@ -24,30 +48,7 @@ def build_level_map(mapping):
     return level_map
 
 
-# alternativ
-
-# add_classifier = True
-# for i, p in enumerate(parents):
-#     print(p)
-#     classifier = self.classifier_map[p]
-#     ranges.append([classifier["range"][0], classifier["range"][1]])
-#     mask[classifier["range"][0] : classifier["range"][1]] = 1
-
-#     if not ignore_labels[i]:
-#         one_hot[self.mapping[token_sequence[i]]["index"]] = 1
-#     else:
-#         add_classifier = False
-#         break
-
-# # add mask for last node if available to allow stop prediction
-# if add_classifier:
-#     print(c)
-#     classifier = self.classifier_map[c]
-#     ranges.append([classifier["range"][0], classifier["range"][1]])
-#     mask[classifier["range"][0] : classifier["range"][1]] = 1
-
-
-class IconclassAllDecoderPipeline(Pipeline):
+class CocoAllDecoderPipeline(Pipeline):
     def __init__(
         self,
         annotation=None,
@@ -73,41 +74,65 @@ class IconclassAllDecoderPipeline(Pipeline):
         self.max_traces = max_traces
 
         self.classes_vec_max_length = max([len(x["tokenizer"]) for x in self.ontology])
-        self.pad_id = self.ontology[0]["tokenizer"].index("#PAD")
-        self.start_id = self.ontology[0]["tokenizer"].index("#START")
+        self.pad_id = 0
+        self.start_id = 1
 
-        logging.info(f"IconclassAll::__init__ -> Len mapping {len(self.mapping)}")
+        logging.info(f"CocoAll::__init__ -> Len mapping {len(self.mapping)}")
 
-        logging.info(f"IconclassAll::__init__ -> Build level map")
+        logging.info(f"CocoAll::__init__ -> Build level map")
         self.level_map = build_level_map(self.mapping.values())
 
-        logging.info(f"IconclassAll::__init__ -> Build classifier map")
+        logging.info(f"CocoAll::__init__ -> Build classifier map")
         self.classifier_map = {}
+        self.cls_ids_map = {}
         for c in self.classifier:
-            self.classifier_map[c["name"]] = c
+            self.classifier_map[c["id"]] = c
+            for x in range(c["range"][0], c["range"][1]):
+
+                self.cls_ids_map[x] = c["index"]
+
+        self.yolo_map = {}
+        for k, x in self.mapping.items():
+            # self.yolo_map
+            all_ids = [x["index"]]
+            all_cls_ids = [self.cls_ids_map[x["index"]]]
+            parent = x["parent"]
+            while parent is not None:
+                all_ids.append(self.mapping[parent]["index"])
+                all_cls_ids.append(self.cls_ids_map[self.mapping[parent]["index"]])
+                parent = self.mapping[parent]["parent"]
+
+            self.yolo_map[k] = {"all_ids": all_ids, "all_cls_ids": all_cls_ids}
 
     def build_flat_target(self, sample):
         y_onehot_flat = torch.zeros(len(self.mapping))
-
         for c in sample["classes"]:
             if c in self.mapping:
                 y_onehot_flat.scatter_(0, torch.tensor(self.mapping[c]["index"]), 1)
         return {"flat_target": y_onehot_flat}
 
     def build_yolo_target(self, sample):
+        # print(sample["classes"])
+        all_ids = []
+        all_cls_ids = []
+        for c in sample["classes"]:
+            k = self.yolo_map[c]
+            all_ids.extend(k["all_ids"])
+            all_cls_ids.extend(k["all_cls_ids"])
+
         result = {}
         y_onehot_yolo_labels = torch.zeros(len(self.mapping))
-        for x in sample["all_ids"]:
+        for x in set(all_ids):
             y_onehot_yolo_labels.scatter_(0, torch.tensor(x), 1)
         result["yolo_target"] = y_onehot_yolo_labels
 
         y_onehot_yolo_classes = torch.zeros(len(self.classifier))
-        for x in sample["all_cls_ids"]:
+        for x in set(all_cls_ids):
             y_onehot_yolo_classes.scatter_(0, torch.tensor(x), 1)
         result["yolo_classes"] = y_onehot_yolo_classes
 
         y_onehot_yolo_labels_weights = torch.zeros(len(self.mapping))
-        for x in sample["all_cls_ids"]:
+        for x in set(all_cls_ids):
             for y in range(self.classifier[x]["range"][0], self.classifier[x]["range"][1]):
                 # print(y)
                 y_onehot_yolo_labels_weights.scatter_(0, torch.tensor(y), 1)
@@ -122,7 +147,7 @@ class IconclassAllDecoderPipeline(Pipeline):
         ontology_ranges = []
         ontology_indexes = []
         for c in sample["classes"]:
-            token_id_sequence = self.mapping[c]["token_id_sequence"]
+            #            token_id_sequence = self.mapping[c]["token_id_sequence"]
 
             token_sequence = self.mapping[c]["parents"] + [c]
             if self.filter_label_by_count is not None and self.filter_label_by_count > 0:
@@ -340,11 +365,8 @@ class IconclassAllDecoderPipeline(Pipeline):
 
     def call(self, datasets=None, **kwargs):
         def decode(sample):
-            out_sample = {
-                "id": sample["id"],
-                "image_data": sample["image_data"],
-            }
-            
+            out_sample = {"id": sample["id"], "image": sample["image"]}
+
             ####
             # build flat vec
             flat_target = self.build_flat_target(sample)
@@ -362,8 +384,8 @@ class IconclassAllDecoderPipeline(Pipeline):
 
             ####
             # build ontology vec
-            ontology_target = self.build_ontology_target(sample)
-            out_sample.update(ontology_target)
+            # ontology_target = self.build_ontology_target(sample)
+            # out_sample.update(ontology_target)
 
             if "additional" in sample:
                 out_sample["additional"] = sample["additional"]
@@ -373,15 +395,80 @@ class IconclassAllDecoderPipeline(Pipeline):
         return MapDataset(datasets, map_fn=decode)
 
 
-@DatasetsManager.export("iconclass_all")
-class IconclassAllDataloader(IconclassDataloader):
+class CocoDecoderPipeline(Pipeline):
+    def __init__(self, num_classes=79, annotation=None):
+        self.num_classes = num_classes
+        self.annotation = annotation
+
+    def call(self, datasets=None, **kwargs):
+        def decode(sample):
+            out_sample = {
+                "image_data": sample[b"image"],
+                "id": sample[b"id"],
+                "path": sample[b"path"].decode("utf-8"),
+            }
+
+            if out_sample["id"] not in self.annotation:
+                logging.info(f"Dataset: {out_sample['id']} not in annotation")
+                return None
+            else:
+                anno = self.annotation[out_sample["id"]]
+
+            return {**out_sample, **anno}
+
+        return MapDataset(datasets, map_fn=decode)
+
+
+@DatasetsManager.export("coco_all")
+class CocoDataloader:
     def __init__(self, args=None, **kwargs):
-        super().__init__(args, **kwargs)
         if args is not None:
             dict_args = vars(args)
             dict_args.update(kwargs)
         else:
             dict_args = kwargs
+
+        self.use_center_crop = dict_args.get("use_center_crop", False)
+
+        self.train_path = dict_args.get("train_path", None)
+        self.train_annotation_path = dict_args.get("train_annotation_path", None)
+
+        self.train_filter_min_dim = dict_args.get("train_filter_min_dim", None)
+        self.train_sample_additional = dict_args.get("train_sample_additional", None)
+
+        self.train_random_sizes = dict_args.get("train_random_sizes", None)
+        self.max_size = dict_args.get("max_size", 800)
+
+        self.val_path = [dict_args.get("val_path", None)]
+        self.val_annotation_path = dict_args.get("val_annotation_path", None)
+        self.val_filter_min_dim = dict_args.get("val_filter_min_dim", None)
+        self.val_size = dict_args.get("val_size", None)
+
+        self.test_path = [dict_args.get("test_path", None)]
+        self.test_annotation_path = dict_args.get("test_annotation_path", None)
+        self.test_filter_min_dim = dict_args.get("test_filter_min_dim", None)
+        self.test_size = dict_args.get("test_size", None)
+
+        self.infer_path = [dict_args.get("infer_path", None)]
+        self.infer_size = [dict_args.get("infer_size", None)]
+
+        self.batch_size = dict_args.get("batch_size", None)
+        self.num_workers = dict_args.get("num_workers", None)
+
+        self.train_annotation = {}
+        if self.train_annotation_path is not None:
+            for path in self.train_annotation_path:
+                self.train_annotation.update(read_jsonl(path, dict_key="id"))
+
+        self.val_annotation = {}
+        if self.val_annotation_path is not None:
+            # for path in self.val_annotation_path:
+            self.val_annotation.update(read_jsonl(self.val_annotation_path, dict_key="id"))
+
+        self.test_annotation = {}
+        if self.test_annotation_path is not None:
+            # for path in self.test_annotation_path:
+            self.test_annotation.update(read_jsonl(self.test_annotation_path, dict_key="id"))
 
         self.mapping_path = dict_args.get("mapping_path", None)
         self.classifier_path = dict_args.get("classifier_path", None)
@@ -414,49 +501,185 @@ class IconclassAllDataloader(IconclassDataloader):
         self.pad_id = None
         for level in self.ontology:
             if self.pad_id is None:
-                self.pad_id = level["tokenizer"].index("#PAD")
+                self.pad_id = 0
 
-            if self.pad_id != level["tokenizer"].index("#PAD"):
+            if self.pad_id != 0:
                 assert False, "#PAD should always have the same index"
 
-    def train_mapping_pipeline(self):
-        return IconclassAllDecoderPipeline(
-            mapping=self.mapping,
-            classifier=self.classifier,
-            ontology=self.ontology,
-            random_trace=self.train_random_trace,
-            merge_one_hot=self.train_merge_one_hot,
-            filter_label_by_count=self.filter_label_by_count,
-            max_traces=self.max_traces,
+    def train(self):
+        pipeline = SequencePipeline(
+            [
+                ConcatShufflePipeline([MsgPackPipeline(path=p) for p in self.train_path]),
+                CocoDecoderPipeline(annotation=self.train_annotation),
+                CocoImageTrainPreprocessingPipeline(),
+                CocoAllDecoderPipeline(
+                    mapping=self.mapping,
+                    classifier=self.classifier,
+                    ontology=self.ontology,
+                    random_trace=self.train_random_trace,
+                    merge_one_hot=self.train_merge_one_hot,
+                    max_traces=self.max_traces,
+                ),
+            ]
         )
 
-    def val_mapping_pipeline(self):
-        return IconclassAllDecoderPipeline(
-            mapping=self.mapping,
-            classifier=self.classifier,
-            ontology=self.ontology,
-            last_trace=self.val_last_trace,
-            merge_one_hot=self.train_merge_one_hot,
-            pad_max_shape=self.val_pad_max_shape,
-            filter_label_by_count=self.filter_label_by_count,
-            max_traces=self.max_traces,
+        dataloader = torch.utils.data.DataLoader(
+            pipeline(),
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            drop_last=True,
+            collate_fn=PadCollate(
+                pad_values={
+                    "image": 0.0,
+                    "image_mask": False,
+                    "parents": "#PAD",
+                    "ontology_mask": 0,
+                    "ontology_target": 0,
+                    "ontology_ranges": 0,
+                    "ontology_trace_mask": 0,
+                    "ontology_indexes": -1,
+                }
+            ),
+        )
+        return dataloader
+
+    def val(self):
+        pipeline = SequencePipeline(
+            [
+                ConcatPipeline([MsgPackPipeline(path=p, shuffle=False) for p in self.val_path]),
+                CocoDecoderPipeline(annotation=self.val_annotation),
+                CocoImageTestPreprocessingPipeline(),
+                CocoAllDecoderPipeline(
+                    mapping=self.mapping,
+                    classifier=self.classifier,
+                    ontology=self.ontology,
+                    random_trace=self.train_random_trace,
+                    merge_one_hot=self.train_merge_one_hot,
+                    max_traces=self.max_traces,
+                ),
+            ]
         )
 
-    def test_mapping_pipeline(self):
-        return IconclassAllDecoderPipeline(
-            mapping=self.mapping,
-            classifier=self.classifier,
-            ontology=self.ontology,
-            last_trace=self.test_last_trace,
-            pad_max_shape=self.test_pad_max_shape,
-            filter_label_by_count=self.filter_label_by_count,
-            max_traces=self.max_traces,
+        dataloader = torch.utils.data.DataLoader(
+            pipeline(),
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            drop_last=True,
+            collate_fn=PadCollate(
+                pad_values={
+                    "image": 0.0,
+                    "image_mask": False,
+                    "parents": "#PAD",
+                    "ontology_mask": 0,
+                    "ontology_target": 0,
+                    "ontology_ranges": 0,
+                    "ontology_trace_mask": 0,
+                    "ontology_indexes": -1,
+                }
+            ),
         )
+        return dataloader
+
+    def test_image_pipeline(self):
+        transforms = torchvision.transforms.Compose(
+            [
+                torchvision.transforms.ToPILImage(),
+                RandomResize([self.test_size], max_size=self.max_size),
+                torchvision.transforms.ToTensor(),
+                torchvision.transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+            ]
+        )
+        return IconclassImagePreprocessingPipeline(
+            transforms,
+            min_size=self.val_filter_min_dim,
+        )
+
+    def test_decode_pieline(self):
+        return SequencePipeline(
+            [
+                ConcatPipeline([MsgPackPipeline(path=p, shuffle=False) for p in self.test_path]),
+                CocoDecoderPipeline(annotation=self.test_annotation),
+            ]
+        )
+
+    def test(self):
+        pipeline = SequencePipeline(
+            [
+                self.test_decode_pieline(),
+                CocoAllDecoderPipeline(
+                    mapping=self.mapping,
+                    classifier=self.classifier,
+                    ontology=self.ontology,
+                    last_trace=self.test_last_trace,
+                    pad_max_shape=self.test_pad_max_shape,
+                    max_traces=self.max_traces,
+                ),
+                self.test_image_pipeline(),
+            ]
+        )
+
+        dataloader = torch.utils.data.DataLoader(
+            pipeline(),
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            pin_memory=True,
+            collate_fn=PadCollate(pad_values={"image": 0.0, "image_mask": False, "parents": "#PAD"}),
+        )
+        return dataloader
+
+    def infer_image_pipeline(self):
+        transforms = torchvision.transforms.Compose(
+            [
+                torchvision.transforms.ToPILImage(),
+                torchvision.transforms.Resize(size=256),
+                torchvision.transforms.ToTensor(),
+                torchvision.transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+            ]
+        )
+        return ImageDecodePipeline(transforms)
+
+    def infer(self):
+
+        pipeline = SequencePipeline([ImagePipeline(self.infer_path), self.infer_image_pipeline()])
+
+        dataloader = torch.utils.data.DataLoader(
+            pipeline(),
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            pin_memory=True,
+            collate_fn=PadCollate(pad_values={"image": 0.0, "image_mask": False}),
+        )
+        return dataloader
 
     @classmethod
     def add_args(cls, parent_parser):
-        parent_parser = super().add_args(parent_parser)
-        parser = argparse.ArgumentParser(parents=[parent_parser], add_help=False, conflict_handler="resolve")
+        parser = argparse.ArgumentParser(parents=[parent_parser], add_help=False)
+
+        parser.add_argument("--use_center_crop", action="store_true", help="verbose output")
+
+        parser.add_argument("--train_path", nargs="+", type=str)
+        parser.add_argument("--train_annotation_path", nargs="+", type=str)
+        parser.add_argument("--train_filter_min_dim", type=int, default=128, help="delete images with smaller size")
+        parser.add_argument("--train_sample_additional", type=float)
+
+        parser.add_argument("--train_random_sizes", type=int, nargs="+", default=[480, 512, 544, 576, 608, 640])
+        parser.add_argument("--max_size", type=int, default=800)
+
+        parser.add_argument("--num_workers", type=int, default=8)
+        parser.add_argument("--batch_size", type=int, default=8)
+
+        parser.add_argument("--val_path", type=str)
+        parser.add_argument("--val_annotation_path", type=str)
+        parser.add_argument("--val_filter_min_dim", type=int, default=128, help="delete images with smaller size")
+        parser.add_argument("--val_size", type=int, default=224)
+
+        parser.add_argument("--test_path", type=str)
+        parser.add_argument("--test_annotation_path", type=str)
+        parser.add_argument("--test_filter_min_dim", type=int, default=128, help="delete images with smaller size")
+        parser.add_argument("--test_size", type=int, default=640)
+
+        parser.add_argument("--infer_path", type=str)
+        parser.add_argument("--infer_size", type=int, default=640)
 
         parser.add_argument("--mapping_path", type=str)
         parser.add_argument("--classifier_path", type=str)
@@ -473,5 +696,4 @@ class IconclassAllDataloader(IconclassDataloader):
 
         parser.add_argument("--test_last_trace", action="store_true")
         parser.add_argument("--test_pad_max_shape", action="store_true")
-
         return parser

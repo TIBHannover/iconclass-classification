@@ -11,6 +11,7 @@ def parse_args():
 
     parser.add_argument("-v", "--verbose", action="store_true", help="verbose output")
     parser.add_argument("-m", "--msgpack_path", help="verbose output")
+    parser.add_argument("-o", "--output_path", help="verbose output")
     args = parser.parse_args()
     return args
 
@@ -27,16 +28,22 @@ def main():
     shards_paths = []
     for p in [args.msgpack_path]:
         shards_paths.extend([os.path.join(p, x) for x in os.listdir(p) if re.match(shard_re, x)])
-    count_a = 0
-    count_sum = 0
+
+    os.makedirs(args.output_path, exist_ok=True)
+
     count = 0
     for path in shards_paths:
         with open(path, "rb") as f:
             packer = msgpack.Unpacker(f, max_buffer_size=1024 * 1024 * 1024, raw=True)
             for p in packer:
-                if b"additional" in p:
-                    count_a += 1
-                    count_sum += len(p[b"additional"])
+                imageio.imwrite(
+                    os.path.join(
+                        args.output_path,
+                        p[b"path"].decode("utf-8"),
+                    ),
+                    imageio.imread(p[b"image"]),
+                    quality=95,
+                )
                 count += 1
 
     return 0

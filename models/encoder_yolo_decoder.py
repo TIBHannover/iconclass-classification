@@ -67,9 +67,12 @@ class EncoderYoloDecoder(BaseModel):
         if self.mapping_path is not None:
             self.mapping_config = read_jsonl(self.mapping_path)
 
-        self.filter_mask = torch.tensor(
-            gen_filter_mask(self.mapping_config, self.filter_label_by_count, key="count.flat")
-        )
+        if self.filter_label_by_count is not None:
+            self.filter_mask = torch.tensor(
+                gen_filter_mask(self.mapping_config, self.filter_label_by_count, key="count.flat")
+            )
+        else:
+            self.filter_mask = torch.ones(len(self.mapping_config), dtype=torch.float32)
 
         self.num_of_labels = torch.tensor(sum(self.mask_vec))
 
@@ -126,10 +129,6 @@ class EncoderYoloDecoder(BaseModel):
 
         loss = self.loss(decoder_result, target) * weights * filter_mask * classes_mask
 
-        if hasattr(self.logger.experiment, "add_histogram"):
-            self.logger.experiment.add_histogram(f"train/logits", logits, self.global_step)
-            self.logger.experiment.add_histogram(f"train/target", target, self.global_step)
-
         self.log("train/loss", torch.sum(loss) / torch.sum(filter_mask * classes_mask))
         return {"loss": torch.mean(loss)}
 
@@ -177,7 +176,7 @@ class EncoderYoloDecoder(BaseModel):
         logging.info("EncoderYoloDecoder::validation_epoch_end -> fbeta")
         fbeta = self.fbeta.compute()
         for thres, value in fbeta.items():
-            self.log(f"val/fbeta-{thres}", value)
+            self.log(f"val/fbeta-{thres}", self.fbeta.mean(value, filter_mask))
 
         logging.info("EncoderYoloDecoder::validation_epoch_end -> map")
         ap_scores_per_class = self.map.compute()
@@ -209,7 +208,7 @@ class EncoderYoloDecoder(BaseModel):
         parser.add_argument("--focal_loss_gamma", type=float, default=2)
         parser.add_argument("--focal_loss_alpha", type=float, default=0.25)
 
-        parser.add_argument("--filter_label_by_count", type=int, default=0)
+        parser.add_argument("--filter_label_by_count", type=int, default=None)
 
         parser.add_argument("--best_threshold", nargs="+", type=float, default=[0.2])
         return parser

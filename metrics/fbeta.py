@@ -21,7 +21,7 @@ class FBetaMetric(Metric):
         self,
         num_classes: int,
         compute_on_step: bool = False,
-        thresholds: List[float] = [0.05, 0.07, 0.09, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4],
+        thresholds: List[float] = [0.05, 0.07, 0.09, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.5],
         beta: float = 2,
         mask: List[float] = None,
         dist_sync_on_step: bool = False,
@@ -61,17 +61,22 @@ class FBetaMetric(Metric):
         max_mask = self._make_mask(argsorted, max_labels)
         min_mask = self._make_mask(argsorted, min_labels)
         prob_mask = probabilities > threshold
+
         return (max_mask & prob_mask) | min_mask
 
     def _make_mask(self, argsrtd, top_n: int):
         mask = np.zeros_like(argsrtd, dtype=np.uint8)
         col_indices = argsrtd[:, -top_n:].reshape(-1)
         row_indices = [i // top_n for i in range(len(col_indices))]
+
         mask[row_indices, col_indices] = 1
         return mask
 
     def get_score(self, y_pred, all_targets):
-        return fbeta_score(all_targets, y_pred, beta=2, average="macro")
+        mask = np.sum(all_targets, axis=0)
+        score = fbeta_score(all_targets, y_pred, beta=2, average=None, zero_division=0.0)
+        score[mask == 0] = np.nan
+        return score
 
     def compute(self) -> Union[Tensor, List[Tensor]]:
         """Compute the average precision score.
@@ -83,17 +88,33 @@ class FBetaMetric(Metric):
         preds = dim_zero_cat(self.preds).cpu().numpy()
         targets = dim_zero_cat(self.targets).cpu().numpy()
 
-        nonfiltered_lbs = np.where(~self.mask.numpy())
-        preds = np.delete(preds, nonfiltered_lbs, axis=1)
-        targets = np.delete(targets, nonfiltered_lbs, axis=1)
+        # nonfiltered_lbs = np.where(~self.mask.numpy())
+        # preds = np.delete(preds, nonfiltered_lbs, axis=1)
+        # targets = np.delete(targets, nonfiltered_lbs, axis=1)
+
         metrics = {}
         arg_sorted = preds.argsort(axis=1)
         for threshold in self.thresholds:
-            metrics[f"{threshold:.2f}"] = self.get_score(
-                self.binarize_prediction(preds, threshold, arg_sorted), targets
+            metrics[f"{threshold:.2f}"] = torch.tensor(
+                # self.get_score(self.binarize_prediction(preds, threshold, arg_sorted), targets)
+                self.get_score(((preds>threshold).astype(float)), targets)
             )
 
         return metrics
+
+    def mean(self, score_per_class, mask=None):
+
+        nan_classes = torch.isnan(score_per_class)
+
+        score_per_class[nan_classes] = 0.0
+        if mask is not None:
+            mask = (1 - nan_classes.float()) * mask
+        else:
+            mask = 1 - nan_classes.float()
+
+        num_classes = torch.sum(mask)
+      
+        return (torch.sum(score_per_class * mask) / num_classes).float()
 
     @property
     def is_differentiable(self) -> bool:

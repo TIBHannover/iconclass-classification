@@ -8,7 +8,7 @@ import torch
 import torchvision
 import imageio
 
-from datasets.image_pipeline import ImagePreprocessingPipeline
+from datasets.image_pipeline import IconclassImagePreprocessingPipeline
 from datasets.datasets import DatasetsManager
 from datasets.pipeline import (
     MapPipeline,
@@ -200,7 +200,7 @@ class IconclassSequenceDecoderPipeline(Pipeline):
                     "source_id_sequence": [start_id] + id_sequence[:-1],
                     "target_vec": torch.tensor(np.asarray(target_vec_list, dtype=np.float32)),
                     "mask": torch.tensor(np.asarray(mask, dtype=np.int8)),
-                    "parents":parents
+                    "parents": parents,
                 }
 
             if "additional" in sample:

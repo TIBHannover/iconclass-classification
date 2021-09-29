@@ -21,6 +21,13 @@ from datasets import DatasetsManager
 from models import ModelsManager
 from packaging import version
 
+import json
+
+try: 
+    import yaml
+except:
+    yaml = None
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="", conflict_handler="resolve")
@@ -28,26 +35,49 @@ def parse_args():
     # set logging
     parser.add_argument("-v", "--verbose", action="store_true", help="verbose output")
     args = parser.parse_known_args(["-v", "--verbose"])
-    print(args)
     level = logging.ERROR
     if args[0].verbose:
         level = logging.INFO
 
     logging.basicConfig(format="%(asctime)s %(levelname)s: %(message)s", datefmt="%d-%m-%Y %H:%M:%S", level=level)
 
+    # parse config
+    parser.add_argument("-c", "--config_path", help="verbose output")
+
+    args = parser.parse_known_args()
+    if args[0].config_path:
+        if re.match('^.*?\.(yml|yaml)$',args[0].config_path):
+            with open(args[0].config_path, 'r') as f:
+                data_dict = yaml.safe_load(f)
+                parser.set_defaults(**data_dict)
+    
+        if re.match('^.*?\.(json)$',args[0].config_path):
+            with open(args[0].config_path, 'r') as f:
+                data_dict = json.load(f)
+                parser.set_defaults(**data_dict)
+    
+    # add arguments
     parser.add_argument("--output_path", help="verbose output")
     parser.add_argument("--use_wandb", action="store_true", help="verbose output")
     parser.add_argument("--progress_refresh_rate", type=int, default=100, help="verbose output")
     parser.add_argument("--wand_name", help="verbose output")
-    parser.add_argument("--checkpoint_save_interval", type=int, default=100, help="verbose output")
+    parser.add_argument("--checkpoint_save_interval", type=int, default=2000, help="verbose output")
     parser = pl.Trainer.add_argparse_args(parser)
     parser = DatasetsManager.add_args(parser)
-    # parser = EncodersManager.add_args(parser)
-    # parser = DecodersManager.add_args(parser)
-    print("ModelsManager")
     parser = ModelsManager.add_args(parser)
     args = parser.parse_args()
-    print(args)
+
+    # write results
+    
+    if args.output_path:
+        os.makedirs(args.output_path, exist_ok=True)
+        if yaml is not None:
+            with open(os.path.join(args.output_path, 'config.yaml'), 'w') as f:
+                yaml.dump(vars(args), f, indent=4)
+
+        with open(os.path.join(args.output_path, 'config.json'), 'w') as f:
+            json.dump(vars(args), f, indent=4)
+
 
     return args
 
@@ -67,8 +97,6 @@ def main():
     callbacks = [
         ProgressPrinter(refresh_rate=args.progress_refresh_rate),
         pl.callbacks.LearningRateMonitor(),
-        # LogImageCallback(),
-        # checkpoint_callback,
     ]
 
     if args.output_path is not None and not args.use_wandb:

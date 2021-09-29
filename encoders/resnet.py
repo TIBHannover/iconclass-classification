@@ -56,14 +56,14 @@ class FrozenBatchNorm2d(torch.nn.Module):
 
 @EncodersManager.export("resnet")
 class ResnetEncoder(nn.Module):
-    def __init__(self, args=None, out_features=None, returned_layers=None, average_pooling=None, **kwargs):
+    def __init__(self, args=None, returned_layers=None, average_pooling=None, **kwargs):
         super(ResnetEncoder, self).__init__()
         if args is not None:
             dict_args = vars(args)
             dict_args.update(kwargs)
         else:
             dict_args = kwargs
-        self.out_features = out_features
+
         self.returned_layers = returned_layers
 
         self.pretrained = dict_args.get("pretrained", None)
@@ -114,13 +114,6 @@ class ResnetEncoder(nn.Module):
             self.body = IntermediateLayerGetter(
                 self.net, return_layers={x: str(i) for i, x in enumerate(self.layers_returned)}
             )
-
-            self.dim = []
-            for i, x in enumerate(self.layers_returned):
-                if x == "layer4":
-                    self.dim.append(self.dim_4)
-                if x == "layer3":
-                    self.dim.append(self.dim_3)
 
             if self.out_features is not None:
                 embedding_layers = []
@@ -245,13 +238,7 @@ class ResnetPositionEncoder(nn.Module):
                 self.net, return_layers={x: str(i) for i, x in enumerate(self.layers_returned)}
             )
 
-            self.dim = []
             self.pos_embedder = []
-            for i, x in enumerate(self.layers_returned):
-                if x == "layer4":
-                    self.dim.append(self.dim_4)
-                if x == "layer3":
-                    self.dim.append(self.dim_3)
 
             if self.out_features is not None:
                 embedding_layers = []

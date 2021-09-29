@@ -53,8 +53,10 @@ class MAPMetric(Metric):
         # logging.info(len(self.preds))
         preds = dim_zero_cat(self.preds).cpu().numpy()
         targets = dim_zero_cat(self.targets).cpu().numpy()
-
-        score_per_class = average_precision_score(targets, preds, average=None)
+        try:
+            score_per_class = average_precision_score(targets, preds, average=None)
+        except:
+            score_per_class = np.zeros_like(preds)
 
         return torch.tensor(score_per_class)
 

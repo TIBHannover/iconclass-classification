@@ -91,14 +91,12 @@ class FBetaMetric(Metric):
         # nonfiltered_lbs = np.where(~self.mask.numpy())
         # preds = np.delete(preds, nonfiltered_lbs, axis=1)
         # targets = np.delete(targets, nonfiltered_lbs, axis=1)
-
         metrics = {}
-        arg_sorted = preds.argsort(axis=1)
         for threshold in self.thresholds:
-            metrics[f"{threshold:.2f}"] = torch.tensor(
-                # self.get_score(self.binarize_prediction(preds, threshold, arg_sorted), targets)
-                self.get_score(((preds>threshold).astype(float)), targets)
-            )
+            try:
+                metrics[f"{threshold:.2f}"] = torch.tensor(self.get_score((preds > threshold).astype(float), targets))
+            except:
+                metrics[f"{threshold:.2f}"] = np.zeros_like(preds)
 
         return metrics
 

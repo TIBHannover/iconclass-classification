@@ -44,6 +44,8 @@ class EncoderFlatDecoder(BaseModel):
         else:
             dict_args = kwargs
 
+        logging.info(f"Params: {dict_args}")
+
         self.encoder_model = dict_args.get("encoder_model", None)
         self.pretrained = dict_args.get("pretrained", None)
 
@@ -83,7 +85,7 @@ class EncoderFlatDecoder(BaseModel):
         # self.vocabulary_size = [len(x["tokenizer"]) for x in self.classifier_config]  # get from tockenizer
         # self.max_vocab_size = max(self.vocabulary_size)
 
-        self.encoder = EncodersManager().build_encoder(name=args.encoder, args=args, out_features=1024)
+        self.encoder = EncodersManager().build_encoder(name=args.encoder, args=args)
         self.decoder = DecodersManager().build_decoder(
             name=args.decoder, args=args, in_features=self.encoder.dim, out_features=len(self.mapping_config)
         )
@@ -127,10 +129,6 @@ class EncoderFlatDecoder(BaseModel):
         filter_mask = self.filter_mask.to(decoder_result.device)
 
         loss = self.loss(decoder_result, target) * weights * filter_mask
-
-        if hasattr(self.logger.experiment, "add_histogram"):
-            self.logger.experiment.add_histogram(f"train/logits", logits, self.global_step)
-            self.logger.experiment.add_histogram(f"train/target", target, self.global_step)
 
         self.log("train/loss", torch.sum(loss) / torch.sum(filter_mask))
         return {"loss": torch.mean(loss)}

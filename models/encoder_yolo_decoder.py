@@ -83,7 +83,7 @@ class EncoderYoloDecoder(BaseModel):
         # self.vocabulary_size = [len(x["tokenizer"]) for x in self.classifier_config]  # get from tockenizer
         # self.max_vocab_size = max(self.vocabulary_size)
 
-        self.encoder = EncodersManager().build_encoder(name=args.encoder, args=args, out_features=1024)
+        self.encoder = EncodersManager().build_encoder(name=args.encoder, args=args)
         self.decoder = DecodersManager().build_decoder(
             name=args.decoder, args=args, in_features=self.encoder.dim, out_features=len(self.mapping_config)
         )
@@ -149,10 +149,6 @@ class EncoderYoloDecoder(BaseModel):
         weights = self.weights.to(decoder_result.device)
         filter_mask = self.filter_mask.to(decoder_result.device)
         loss = self.loss(decoder_result, target) * weights * filter_mask * classes_mask
-
-        if hasattr(self.logger.experiment, "add_histogram"):
-            self.logger.experiment.add_histogram(f"val/logits", logits, self.global_step)
-            self.logger.experiment.add_histogram(f"val/target", target, self.global_step)
 
         self.fbeta(torch.sigmoid(logits), target)
         self.map(torch.sigmoid(logits), target)

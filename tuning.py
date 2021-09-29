@@ -9,7 +9,7 @@ import uuid
 import ray
 from ray import tune
 from ray.tune.integration.pytorch_lightning import TuneReportCallback
-
+from ray.tune import CLIReporter
 
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import TensorBoardLogger, WandbLogger
@@ -58,10 +58,13 @@ def hyper_config(args):
         "lr": tune.choice([1e-2, 1e-3, 1e-4]),
         "batch_size": tune.choice([32, 16]),
         "use_focal_loss": tune.choice([True, False]),
-        "optimizer": tune.choice(["SGD", "ADAM"]),
+        "opt_type": tune.choice(["SGD", "ADAM"]),
         "sched_type": tune.choice(["cosine", None]),
         "nesterov": tune.choice([True, False]),
-        "weight_decay": tune.choice([1e-2, 1e-3, 1e-4, 1e-5]),
+        "weight_decay": tune.choice([1e-4, 1e-5]),
+        "lr_rampup": tune.choice([1000, 2000, 5000]),
+        "lr_init": tune.choice([0.0]),
+        "lr_rampdown": tune.choice([60000, 80000, 100000]),
     }
 
     if args.decoder == "transformer_level_wise":
@@ -84,10 +87,13 @@ def hyper_config(args):
                 "decoder_attention_dim": tune.choice([128, 256, 512]),
             }
         )
+
+    if hasattr(args, "resnet_output_depth"):
+        parameters["resnet_output_depth"] = tune.choice([None, 256, 512, 1024])
     return parameters
 
 
-def train_tune(config, num_steps=20000, num_gpus=-1):
+def train_tune(config, num_steps=50000, num_gpus=-1):
     args = config["args"]
     del config["args"]
 
@@ -116,7 +122,7 @@ def train_tune(config, num_steps=20000, num_gpus=-1):
 
     callbacks = [
         TuneReportCallback({"loss": "val/loss", "map": "val/map"}, on="validation_end"),
-        ProgressPrinter(refresh_rate=1),
+        ProgressPrinter(refresh_rate=1000),
     ]
 
     trainer = pl.Trainer(
@@ -126,7 +132,7 @@ def train_tune(config, num_steps=20000, num_gpus=-1):
         logger=TensorBoardLogger(save_dir=tune.get_trial_dir(), name="", version="."),
         progress_bar_refresh_rate=0,
         callbacks=callbacks,
-        val_check_interval=int(num_steps / 10),
+        val_check_interval=int(num_steps / 50),
         precision=16,
     )
     trainer.fit(model, train_dataloader=dataset.train(), val_dataloaders=dataset.val())
@@ -156,63 +162,10 @@ def main():
         resources_per_trial={"gpu": 1},
     )
 
-    print(analysis.best_config)
-    # callbacks = [
-    #     ProgressPrinter(refresh_rate=args.progress_refresh_rate),
-    #     pl.callbacks.LearningRateMonitor(),
-    #     # LogImageCallback(),
-    #     # checkpoint_callback,
-    # ]
-
-    # if args.output_path is not None and not args.use_wandb:
-    #     logger = TensorBoardLogger(save_dir=args.output_path, name="summary")
-
-    #     callbacks.extend([TensorBoardLogImageCallback])
-    # elif args.use_wandb:
-    #     name = f"{args.model}"
-    #     if hasattr(args, "encoder"):
-    #         name += f"-{args.encoder}"
-    #     if hasattr(args, "decoder"):
-    #         name += f"-{args.decoder}"
-    #     name += f"-{uuid.uuid4().hex[:4]}"
-    #     logger = WandbLogger(project="iart_hierarchical", log_model=False, name=name)
-    #     logger.watch(model)
-    #     # callbacks.extend([WandbLogImageCallback()])
-    # else:
-    #     logging.warning("No logger available")
-    #     logger = None
-
-    # if version.parse(pl.__version__) < version.parse("1.4"):
-    #     checkpoint_callback = ModelCheckpoint(
-    #         checkpoint_save_interval=args.checkpoint_save_interval,
-    #         dirpath=args.output_path,
-    #         filename="model_{step:06d}",
-    #         save_top_k=-1,
-    #         verbose=True,
-    #         period=1,
-    #     )
-    # else:
-    #     checkpoint_callback = pl.callbacks.model_checkpoint.ModelCheckpoint(
-    #         dirpath=args.output_path, save_top_k=-1, every_n_train_steps=args.checkpoint_save_interval
-    #     )
-
-    # callbacks.extend([checkpoint_callback])
-
-    # # callbacks = [
-    # #     ProgressPrinter(refresh_rate=args.progress_refresh_rate),
-    # #     pl.callbacks.LearningRateMonitor(),
-    # #     LogImageCallback(),
-    # #     checkpoint_callback,
-    # # ]
-    # print(callbacks)
-    # trainer = pl.Trainer.from_argparse_args(
-    #     args,
-    #     callbacks=callbacks,
-    #     logger=logger,
-    #     # checkpoint_callback=checkpoint_callback,
-    # )
-
-    # trainer.fit(model, train_dataloader=dataset.train(), val_dataloaders=dataset.val())
+    best_trial = analysis.get_best_trial("map", "max", "last")
+    print("Best trial config: {}".format(best_trial.config))
+    print("Best trial final validation loss: {}".format(best_trial.last_result["loss"]))
+    print("Best trial final validation mao: {}".format(best_trial.last_result["map"]))
 
     return 0
 

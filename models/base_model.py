@@ -62,7 +62,6 @@ class BaseModel(LightningModule):
 
     def configure_optimizers(self):
         def build_optimizer(model, type, **kwargs):
-            print(kwargs)
             parameterwise = {
                 "(bn|gn)(\d+)?.(weight|bias)": dict(weight_decay=0.0, lars_exclude=True),
                 "bias": dict(weight_decay=0.0, lars_exclude=True),

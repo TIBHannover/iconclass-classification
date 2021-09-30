@@ -9,23 +9,69 @@ import pytorch_lightning as pl
 from pytorch_lightning.loggers import TensorBoardLogger
 import torch
 
-from callbacks import ModelCheckpoint, ProgressPrinter, LogImageCallback  # , LogImageCallback
+from callbacks import ModelCheckpoint, ProgressPrinter
 from datasets import DatasetsManager
 from models import ModelsManager
 
 from pytorch_lightning.utilities.cloud_io import load as pl_load
 
 
+import json
+
+try:
+    import yaml
+except:
+    yaml = None
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="", conflict_handler="resolve")
 
+    # set logging
     parser.add_argument("-v", "--verbose", action="store_true", help="verbose output")
+    args = parser.parse_known_args(["-v", "--verbose"])
+    level = logging.ERROR
+    if args[0].verbose:
+        level = logging.INFO
 
+    logging.basicConfig(format="%(asctime)s %(levelname)s: %(message)s", datefmt="%d-%m-%Y %H:%M:%S", level=level)
+
+    # parse config
+    parser.add_argument("-c", "--config_path", help="verbose output")
+
+    args = parser.parse_known_args()
+    if args[0].config_path:
+        if re.match("^.*?\.(yml|yaml)$", args[0].config_path):
+            with open(args[0].config_path, "r") as f:
+                data_dict = yaml.safe_load(f)
+                parser.set_defaults(**data_dict)
+
+        if re.match("^.*?\.(json)$", args[0].config_path):
+            with open(args[0].config_path, "r") as f:
+                data_dict = json.load(f)
+                parser.set_defaults(**data_dict)
+
+    # add arguments
+    parser.add_argument("--output_path", help="verbose output")
+    parser.add_argument("--use_wandb", action="store_true", help="verbose output")
+    parser.add_argument("--progress_refresh_rate", type=int, default=100, help="verbose output")
+    parser.add_argument("--wand_name", help="verbose output")
+    parser.add_argument("--checkpoint_save_interval", type=int, default=2000, help="verbose output")
     parser = pl.Trainer.add_argparse_args(parser)
     parser = DatasetsManager.add_args(parser)
     parser = ModelsManager.add_args(parser)
-
     args = parser.parse_args()
+
+    # write results
+
+    if args.output_path:
+        os.makedirs(args.output_path, exist_ok=True)
+        if yaml is not None:
+            with open(os.path.join(args.output_path, "config.yaml"), "w") as f:
+                yaml.dump(vars(args), f, indent=4)
+
+        with open(os.path.join(args.output_path, "config.json"), "w") as f:
+            json.dump(vars(args), f, indent=4)
 
     return args
 
@@ -41,11 +87,11 @@ def main():
 
     dataset = DatasetsManager().build_dataset(name=args.dataset, args=args)
 
-    # for x in dataset.test():
-    #     print(x)
-    #     exit()
+    for x in dataset.test():
+        print(x)
+        exit()
     model = ModelsManager().build_model(name=args.model, args=args)
-    
+
     trainer = pl.Trainer.from_argparse_args(args)
 
     checkpoint_data = pl_load(args.resume_from_checkpoint, map_location=lambda storage, loc: storage)
@@ -53,14 +99,9 @@ def main():
     model.load_state_dict(checkpoint_data["state_dict"])
     model.freeze()
     model.eval()
-    
-    print(trainer.test(model, test_dataloaders=dataset.test()))
-    
-    # for batch in dataset.infer():
 
-    #     for prediction in model.infer_step(batch, k=20):
-    #         print(f"{prediction['id']} {prediction['txt']}")
-    #         # print(prediction)
+    print(trainer.test(model, test_dataloaders=dataset.test()))
+
     return 0
 
 

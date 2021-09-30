@@ -141,3 +141,4 @@ cython_debug/
 slurm-*
 .vscode/
 wandb/
+*.out

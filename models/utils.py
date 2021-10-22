@@ -124,3 +124,30 @@ def build_level_map(mapping):
         level_map[m["index"]] = len(m["parents"])
 
     return level_map
+
+def local_to_global_mapping_config(mapping):
+    #map local indexes in each level(path) to global indexes
+    mapto_global_id = dict()
+    for v in mapping:
+        local_index = tuple(v["token_id_sequence"])
+        mapto_global_id[local_index] = v["index"]+2
+    return mapto_global_id
+
+def mapping_local_global_idx(mapping, seq):
+    next_seq_global = []
+    for s in seq:
+        next_seq_global.append(mapping[tuple(s.tolist())])
+    return next_seq_global
+
+def check_seq_path(token_id, seq, mapping_global_indexes):
+    #checking the [seq,token_id] sequence exists in the mapping_global_indexes dict
+
+    flag = True
+    try:
+        seq = seq.tolist()
+        seq.append(token_id.item())
+        mapping_global_indexes[(tuple(seq))]
+    except KeyError:
+        flag = False
+    return flag
+    

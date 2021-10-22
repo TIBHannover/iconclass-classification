@@ -68,7 +68,8 @@ class EncoderHierarchicalDecoder(BaseModel):
         self.mask_vec = []
         if self.mapping_path is not None:
             self.mapping_config = read_jsonl(self.mapping_path)
-
+            self.mapping_global_indexes = utils.local_to_global_mapping_config(self.mapping_config)
+            
         self.classifier = []
         if self.classifier_path is not None:
             self.classifier = read_jsonl(self.classifier_path)
@@ -98,7 +99,9 @@ class EncoderHierarchicalDecoder(BaseModel):
         elif self.output_method == "global":
             self.output_sizes = [2 + len(self.mapping_config) for i in range(len(self.ontology))]
             self.embedding_sizes = 2 + len(self.mapping_config)
-
+        
+        
+        
         # if self.use_weights is not None:
         #     self.weights = [x['weight'] for x in self.mapping_config]
         #     self.weights = np.array(self.weights)
@@ -110,6 +113,7 @@ class EncoderHierarchicalDecoder(BaseModel):
             in_features=self.encoder.dim,
             embedding_size=self.embedding_sizes,
             vocabulary_sizes=self.output_sizes,
+            mapping_global_indexes = self.mapping_global_indexes
         )
 
         if self.using_weights:
@@ -130,12 +134,13 @@ class EncoderHierarchicalDecoder(BaseModel):
             self.loss = torch.nn.BCEWithLogitsLoss(reduction="none")
         self.fbeta = FBetaMetric(num_classes=len(self.mapping_config))
         self.map = MAPMetric(num_classes=len(self.mapping_config))
-
+        
+        self.beam_size = 6
+        
     def forward(self, x):
         return x
 
     def training_step(self, batch, batch_idx):
-
         image = batch["image"]
         target = batch["ontology_target"]
 
@@ -213,6 +218,7 @@ class EncoderHierarchicalDecoder(BaseModel):
         mask_level_with_tokens = utils.add_sequence_tokens_to_level_ontology(mask_level)
 
         self.image = image
+
         # image = F.interpolate(image, size = (299,299), mode= 'bicubic', align_corners=False)
         # forward image
         image_embedding = self.encoder(image)
@@ -311,7 +317,54 @@ class EncoderHierarchicalDecoder(BaseModel):
 
         self.fbeta.reset()
         self.map.reset()
+    
+    def test_step(self, batch, batch_idx):
+        image = batch["image"]
+        target = batch["ontology_target"]
 
+        flat_target = target.reshape(-1, target.shape[-1])
+        trace_mask = batch["ontology_trace_mask"]
+
+        src = batch["ontology_indexes"]
+        tgt_level = utils.map_to_level_ontology(batch["ontology_target"], batch["ontology_levels"])
+        mask_level = utils.map_to_level_ontology(batch["ontology_mask"], batch["ontology_levels"])
+
+        # add pad and start
+        src_level_with_tokens = utils.add_sequence_tokens_to_index(src, add_start=True)
+
+        src_level_with_tokens = src_level_with_tokens[:, :, :-1]
+        tgt_level_with_tokens = utils.add_sequence_tokens_to_level_ontology_target(tgt_level, mask_level)
+        mask_level_with_tokens = utils.add_sequence_tokens_to_level_ontology(mask_level)
+        src_level_with_tokens = src_level_with_tokens.reshape(-1, src_level_with_tokens.shape[-1])
+        print(f"Target src:{src_level_with_tokens} ")
+        self.image = image
+
+        # image = F.interpolate(image, size = (299,299), mode= 'bicubic', align_corners=False)
+        # forward image
+        image_embedding = self.encoder(image)
+
+        decoder_inp = torch.ones([image_embedding.shape[0], 1], dtype=torch.int64).to(image_embedding.device.index)
+        decoder_result = self.decoder.new_test(image_embedding,decoder_inp, self.beam_size, self.ontology)  
+
+        exit()
+        # # increase batchsize if we have more than one trace
+        # image_embedding = torch.repeat_interleave(image_embedding, src.shape[1], dim=0)
+
+        # # flat traces to batch
+        # tgt_level_with_tokens = [t.reshape(-1, t.shape[-1]) for t in tgt_level_with_tokens]
+        # mask_level_with_tokens = [t.reshape(-1, t.shape[-1]) for t in mask_level_with_tokens]
+        # src_level_with_tokens = src_level_with_tokens.reshape(-1, src_level_with_tokens.shape[-1])
+        # trace_mask = trace_mask.reshape(-1)
+
+        # compute hierarchical prediction
+        # decoder_result = self.decoder.test(image_embedding, src_level_with_tokens)
+        
+        decoder_without_tokens = utils.del_sequence_tokens_from_level_ontology(decoder_result)
+
+        # flat output (similar to yolo)
+        flat_prediction = utils.map_to_flat_ontology(decoder_without_tokens, batch["ontology_levels"])
+
+        
     @classmethod
     def add_args(cls, parent_parser):
         logging.info("EncoderHierarchicalDecoder::add_args")

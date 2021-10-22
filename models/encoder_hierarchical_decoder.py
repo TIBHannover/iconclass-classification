@@ -344,7 +344,7 @@ class EncoderHierarchicalDecoder(BaseModel):
         image_embedding = self.encoder(image)
 
         decoder_inp = torch.ones([image_embedding.shape[0], 1], dtype=torch.int64).to(image_embedding.device.index)
-        decoder_result = self.decoder.new_test(image_embedding,decoder_inp, self.beam_size, self.ontology)  
+        decoder_result = self.decoder.test_final(image_embedding,decoder_inp, self.beam_size, self.ontology)  
 
         exit()
         # # increase batchsize if we have more than one trace

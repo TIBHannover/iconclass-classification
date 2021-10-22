@@ -9,8 +9,9 @@ from typing import Dict, List
 
 from decoders.decoders import DecodersManager
 
-from tools.Beam import BeamHypotheses
+from tools.beam_search import BeamSearchScorer
 from models.utils import mapping_local_global_idx, check_seq_path
+
 
 class BahdanauAttention(nn.Module):
     def __init__(self, encoder_dim, attention_dim):
@@ -136,137 +137,25 @@ class AttnRNNLevelWiseDecoder(nn.Module):
             
         return outputs
     
-    
-    def new_test(self, context_vec, src, k, ontology):
-        ouput_tmp = []
+    def test_final(self, context_vec, src, k, ontology):
         batch_size = context_vec.shape[0]
-        # group_size = k/3
         #expand to beam size
         context_vec = torch.repeat_interleave(context_vec, k, dim=0)
         src = torch.repeat_interleave(src, k, dim=0)
-        
-        local_seq_src = torch.ones(src.shape, dtype=torch.int64).to(src.device.index)
-        
         hidden = self.model.init_hidden_state(context_vec)
-        
-        beam_scores = torch.zeros((batch_size, k)).to(context_vec.device.index)
-        beam_scores[:,1:] = -1e9
-        beam_scores = beam_scores.view(-1)
-        done = [False for _ in range(batch_size)]
-        generated_hyps = [BeamHypotheses(k, len(ontology))for _ in range(batch_size)]
-        
-        pos_ind = (torch.tensor(range(batch_size)) * k).view(-1, 1).to(context_vec.device.index)
-        
+        bsearch = BeamSearchScorer(batch_size, k, len(ontology), 
+                                   context_vec.device.index, src, 
+                                   self.mapping_global_indexes
+                                   )
+
         for i_lev in range(len(ontology)):
-            print(src[:,i_lev].shape)
-            print(context_vec.shape)
-            print(hidden.shape)
-            print(i_lev)
             lb_level_dict = ontology[i_lev]["tokenizer"]
             pred, hidden, _ = self.model(src[:,i_lev], context_vec, hidden, i_lev)
-            
-            sig_pred = torch.sigmoid(pred)
-            print(sig_pred.shape)
-            next_scores = sig_pred + beam_scores[:,None].expand_as(sig_pred)
-            print(next_scores.shape)
-            next_scores = next_scores.view(batch_size, k*sig_pred.shape[1])
-            # print(next_scores)
-
-            #TAKE TOPK- next_scores: (batch_size, k) next_tokens: (batch_size, k)
-            next_scores, next_tokens = torch.topk(next_scores, sig_pred.shape[1]*k, dim=1, largest=True, sorted=True)
-            if i_lev == 2:
-                print('&&&&&&&&&&&&&&&&&&&&&&&&')
-                print(next_scores)
-                print(next_tokens)
-                print('%%%%%%%%%%%%%%%check beams and tokens%%%%%%%%%%%%%%%%%%%55')
-                check_beams =next_tokens//sig_pred.shape[1] + pos_ind
-                print(check_beams)
-                check_tokens = next_tokens%sig_pred.shape[1]
-                print(check_tokens)
-                print('&&&&&&&&&&&&&&&&&&&&&&&&')
-            # (Score, token_id, beam_id)
-            next_batch_beam = []
-            for batch_idx in range(batch_size):
-                # if done[batch_idx]:
-                #     # print("problem 1")
-                #     next_batch_beam.extend([0,lb_level_dict.index("#PAD"), 0])
-                #     continue
-                next_sent_beam = [] #save triples(beam_token_scores)
-                for beam_token_rank, (beam_token_id, beam_token_score) in enumerate(
-                        zip(next_tokens[batch_idx], next_scores[batch_idx])):
-                    beam_id = torch.div(beam_token_id, sig_pred.shape[1], rounding_mode='floor')
-                    token_id = beam_token_id % sig_pred.shape[1]
-                    effective_beam_id = batch_idx * k + beam_id
-                    # print(effective_beam_id)
-                    if token_id == lb_level_dict.index("#PAD"):
-                        # print("problem 3")
-                        is_beam_token_worse_than_top_num_beams = beam_token_rank >= k
-                        if is_beam_token_worse_than_top_num_beams:
-                            continue
-                        generated_hyps[batch_idx].add(src[effective_beam_id], beam_token_score)
-                    elif check_seq_path(token_id, local_seq_src[effective_beam_id,1:], self.mapping_global_indexes):
-                        next_sent_beam.append((beam_token_score, token_id, effective_beam_id))
-        
-                        if len(next_sent_beam) ==k:
-                            break
-                            # done[batch_idx] = done[batch_idx] or generated_hyps[batch_idx].is_done(
-                            #                 next_scores[batch_idx].max().item(), i_lev+1) 
-                    else:
-                        continue
-                
-                next_batch_beam.extend(next_sent_beam)
-            
-            print('######')
-            print(next_batch_beam)
-            print('######')
-
-            #get global indexes  
-            # print(src)
-            
-            beam_idx = src.new([x[2] for x in next_batch_beam])
-            
-
-            src = src[beam_idx, :]
-            # print(src)
-            
-            local_seq_src= local_seq_src[beam_idx, :]
-            next_local_src = torch.stack([x[1] for x in next_batch_beam]
-                                                           ).unsqueeze(1).to(context_vec.device.index)
-            # print(local_seq_src)
-            local_seq_src = torch.cat((local_seq_src, next_local_src), dim =1)
-            next_global_src = mapping_local_global_idx(self.mapping_global_indexes,local_seq_src[:,1:])
-            print('*************')
-            print(next_global_src)
-
-            src = torch.cat((src, torch.tensor(next_global_src, dtype =torch.int64
-                                                           ).unsqueeze(1).to(context_vec.device.index)), dim =1)
-            hidden = hidden[src[:,i_lev]] #TODO should we change the order of hidden state according to winning beams?
+            src, beam_id = bsearch.process(src, pred, lb_level_dict, i_lev)
             print(src)
+            
+        
 
-            if all(done):
-                break
-            
-            beam_scores = beam_scores.new([x[0] for x in next_batch_beam])
-            # beam_tokens = src.new([x[1] for x in next_batch_beam])
-            # beam_idx = src.new([x[2] for x in next_batch_beam])
-            # print(beam_scores)
-            # Take out valid input_ids, because some beam_ids are not in beam_idx,
-            # Because some sentences corresponding to beam id have been decoded
-            # input_ids = input_ids[beam_idx, :] # (num_beams * batch_size, seq_len)
-            # (num_beams * batch_size, seq_len) ==> (num_beams * batch_size, seq_len + 1)
-            # input_ids = torch.cat([input_ids, beam_tokens.unsqueeze(1)], dim=-1)
-            
-            # print(beam_id)
-            # print(token_id)
-            print('********************')
-            print(local_seq_src)
-            print('***###***')
-            # print(next_batch_beam)
-            print('(((((((%%%%%')
-            # for i in range(batch_size):
-            #     print(generated_hyps[i].beams)
-            if i_lev ==2:
-                exit()
 
     
     # def test(self, context_vec, src, k, ontology):

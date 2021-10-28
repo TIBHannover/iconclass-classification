@@ -263,7 +263,7 @@ class IconclassAllDataloader(IconclassDataloader):
             ontology=self.ontology,
             merge_one_hot=self.train_merge_one_hot,
             filter_label_by_count=self.filter_label_by_count,
-            max_traces=self.max_traces,
+            max_traces=None,
         )
 
     @classmethod

@@ -87,8 +87,7 @@ class AttnRNNLevelWise(nn.Module):
         x = self.fc3[level](x)
 
         return x, output, attention_weights
-    
-    
+
     def reset_state(self, batch_size):
         return torch.zeros((batch_size, self.attention_dim))
 
@@ -100,7 +99,7 @@ class AttnRNNLevelWise(nn.Module):
 
 @DecodersManager.export("attn_rnn_level_wise")
 class AttnRNNLevelWiseDecoder(nn.Module):
-    def __init__(self, in_features, embedding_size, vocabulary_sizes, mapping_global_indexes, args=None, **kwargs):
+    def __init__(self, in_features, embedding_size, vocabulary_sizes, mapper, args=None, **kwargs):
         super(AttnRNNLevelWiseDecoder, self).__init__()
         if args is not None:
             dict_args = vars(args)
@@ -115,9 +114,9 @@ class AttnRNNLevelWiseDecoder(nn.Module):
         self.in_features = in_features
         self.embedding_size = embedding_size
         self.vocabulary_sizes = vocabulary_sizes
-        
-        self.mapping_global_indexes = mapping_global_indexes
-        
+
+        self.mapper = mapper
+
         self.model = AttnRNNLevelWise(
             self.embedding_size,
             self.decoder_embedding_dim,
@@ -125,7 +124,7 @@ class AttnRNNLevelWiseDecoder(nn.Module):
             self.in_features,
             self.vocabulary_sizes,
         )
-        
+
     def forward(self, context_vec, src):
         hidden = self.model.init_hidden_state(context_vec)
         print(src)
@@ -134,54 +133,52 @@ class AttnRNNLevelWiseDecoder(nn.Module):
             pred, hidden, _ = self.model(src[:, i_lev], context_vec, hidden, i_lev)
 
             outputs.append(pred)
-            
+
         return outputs
-    
-    def test_final(self, context_vec, src, k, ontology):
+
+    def test_final(self, context_vec, k, ontology):
         batch_size = context_vec.shape[0]
-        #expand to beam size
+        # expand to beam size
         context_vec = torch.repeat_interleave(context_vec, k, dim=0)
-        src = torch.repeat_interleave(src, k, dim=0)
         hidden = self.model.init_hidden_state(context_vec)
-        bsearch = BeamSearchScorer(batch_size, k, len(ontology), 
-                                   context_vec.device.index, src, 
-                                   self.mapping_global_indexes
-                                   )
+
+        x = torch.ones([context_vec.shape[0], 1], dtype=torch.int64).to(context_vec.device.index)
+        x = torch.repeat_interleave(x, k, dim=0)
+        bsearch = BeamSearchScorer(batch_size, k, len(ontology), context_vec.device.index, x, self.mapper)
+
+        # exit()
 
         for i_lev in range(len(ontology)):
-            lb_level_dict = ontology[i_lev]["tokenizer"]
-            pred, hidden, _ = self.model(src[:,i_lev], context_vec, hidden, i_lev)
-            src, beam_id = bsearch.process(src, pred, lb_level_dict, i_lev)
-            print(src)
-            
-        
 
+            pred, hidden, _ = self.model(x[:, i_lev], context_vec, hidden, i_lev)
 
-    
+            x, beam_id = bsearch.process(x, pred, i_lev)
+            print(x)
+
     # def test(self, context_vec, src, k, ontology):
     #     batch_size = context_vec.shape[0]
     #     #expand to beam size
     #     context_vec = torch.repeat_interleave(context_vec, k, dim=0)
     #     src = torch.repeat_interleave(src, k, dim=0)
-        
+
     #     hidden = self.model.init_hidden_state(context_vec)
-        
+
     #     # Tensor to store top k sequences; now they're just <start>
     #     seqs = torch.ones([context_vec.shape[0], 1], dtype=torch.int64).to(context_vec.device.index)  # (batch_size*k, 1)
     #     scores = torch.zeros([context_vec.shape[0], 1], dtype=torch.int64).to(context_vec.device.index)
     #     pos_ind = (torch.tensor(range(batch_size)) * k).view(-1, 1).to(context_vec.device.index)
     #     print(seqs.shape)
-        
+
     #     # Lists to store completed sequences and scores
     #     complete_seqs = list()
     #     complete_seqs_scores = list()
-        
+
     #     outputs_pred = []
     #     for i_lev in range(len(ontology)):
     #         lb_level_dict = ontology[i_lev]["tokenizer"]
     #         pred, hidden, _ = self.model(src, context_vec, hidden, i_lev)
     #         outputs_pred.append(pred)
-            
+
     #         sig_pred = torch.sigmoid(pred)
     #         sig_pred = scores.repeat_interleave(sig_pred.shape[1], dim = 1) + sig_pred
     #         # Get the top_k predictions
@@ -195,24 +192,22 @@ class AttnRNNLevelWiseDecoder(nn.Module):
 
     #         seqs= torch.cat([seqs[prev_word_inds.squeeze(1)], next_word_inds], dim =1)
 
-
-            
     #         incomplete_inds = [
     #             ind for ind, v in enumerate(next_word_inds) if v != lb_level_dict.index("#PAD")
     #         ]
     #         complete_inds = list(set(range(len(next_word_inds))) - set(incomplete_inds))
-            
+
     #         # Set aside complete sequences
     #         if len(complete_inds) > 0:
     #             complete_seqs.extend(seqs[complete_inds])
     #             complete_seqs_scores.extend(scores[complete_inds])
     #         k -= len(complete_inds)  # reduce beam length accordingly
-            
-    #         if k == 0: 
+
+    #         if k == 0:
     #             break
-            
+
     #         scores += topk_scores.view(batch_size*k , 1)
-            
+
     #         seqs = seqs[incomplete_inds]
     #         hidden = hidden[prev_word_inds[incomplete_inds]]
     #         # c = c[prev_word_inds[incomplete_inds]]
@@ -229,25 +224,22 @@ class AttnRNNLevelWiseDecoder(nn.Module):
     #     if convert_outputs:
     #         seqs = list(map(lambda l: l[1:], seqs))
     #         return self.seq2str(seqs)
-            
-            
+
     #         # print(scores)
     #         # print(topk_words)
     #         exit()
     #         # sig_pred = torch.tensor(sig_pred>0.15, dtype=torch.int32)
-            
-    #         # sig_pred.view(args.batch_size,args.ma_trace, -1) 
-            
-    #         # idx = (sig_pred == 1).nonzero()
-            
 
-            
-        #     outputs.append(pred)
-        # return outputs
-    
+    #         # sig_pred.view(args.batch_size,args.ma_trace, -1)
+
+    #         # idx = (sig_pred == 1).nonzero()
+
+    #     outputs.append(pred)
+    # return outputs
+
     def beam_search(self):
-        print('etwas')
-    
+        print("etwas")
+
     @classmethod
     def add_args(cls, parent_parser):
         logging.info("Add FlatDecoder args")

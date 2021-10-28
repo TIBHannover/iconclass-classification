@@ -4,6 +4,10 @@ import torch
 import argparse
 from datasets.utils import get_element
 
+from typing import List, Union
+
+from torch import Tensor, LongTensor
+
 
 def sigmoid_rampup(current, rampup_length):
     """Exponential rampup from https://arxiv.org/abs/1610.02242"""
@@ -125,13 +129,15 @@ def build_level_map(mapping):
 
     return level_map
 
+
 def local_to_global_mapping_config(mapping):
-    #map local indexes in each level(path) to global indexes
+    # map local indexes in each level(path) to global indexes
     mapto_global_id = dict()
     for v in mapping:
         local_index = tuple(v["token_id_sequence"])
-        mapto_global_id[local_index] = v["index"]+2
+        mapto_global_id[local_index] = v["index"] + 2
     return mapto_global_id
+
 
 def mapping_local_global_idx(mapping, seq):
     next_seq_global = []
@@ -139,8 +145,9 @@ def mapping_local_global_idx(mapping, seq):
         next_seq_global.append(mapping[tuple(s.tolist())])
     return next_seq_global
 
+
 def check_seq_path(token_id, seq, mapping_global_indexes):
-    #checking the [seq,token_id] sequence exists in the mapping_global_indexes dict
+    # checking the [seq,token_id] sequence exists in the mapping_global_indexes dict
 
     flag = True
     try:
@@ -150,4 +157,70 @@ def check_seq_path(token_id, seq, mapping_global_indexes):
     except KeyError:
         flag = False
     return flag
-    
+
+
+class HierarchicalLevelMapper:
+    def __init__(self, mapping: List, classifier: List) -> None:
+        self.level_map = build_level_map(mapping)
+        self.mapping_map = {x["index"]: x for x in mapping}
+        self.classifier_map = {x["id"]: x for x in classifier}
+
+    def to_flat(self, ontology: Tensor, level: int, remove_tokens: bool = True) -> Tensor:
+        print("####")
+        print(ontology.shape)
+        if remove_tokens:
+            ontology = ontology[..., 2:]
+        print(ontology.shape)
+        print(f"level_map {self.level_map.shape}")
+        print(self.level_map.shape[-1])
+        mapping = torch.arange(self.level_map.shape[-1])
+
+        m = mapping[self.level_map == level]
+        print(f"mapping")
+        print(mapping.shape)
+        print(mapping)
+        print(m)
+        print(m.shape)
+        print(m)
+        flat = torch.zeros(*ontology.shape[:-1], self.level_map.shape[-1], dtype=ontology.dtype, device=ontology.device)
+        print(flat.shape)
+        flat[..., m] = ontology
+
+        return flat
+
+    def classifier_mask_from_parent(self, classifiers: Union[List[int], LongTensor], remove_tokens: bool = True):
+        print(classifiers)
+        if isinstance(classifiers, Tensor):
+            classifiers = classifiers.cpu().detach().numpy().tolist()
+        result = []
+        for x in classifiers:
+            mask = torch.zeros(len(self.mapping_map))
+            if remove_tokens:
+                if x == 1:
+                    x = None
+                else:
+                    x = x - 2
+
+            if x is None:
+                classifier = self.classifier_map[x]
+                mask[classifier["range"][0] : classifier["range"][1]] = 1
+            else:
+                mapping = self.mapping_map[x]
+                if mapping["id"] in self.classifier_map:
+                    classifier = self.classifier_map[mapping["id"]]
+                    mask[classifier["range"][0] : classifier["range"][1]] = 1
+
+            self.mapping_map
+            result.append(mask)
+
+        return torch.stack(result, dim=0)
+
+        # one_hot = torch.zeros(len(self.mapping))
+        # mask = torch.zeros(len(self.mapping))
+
+        #     classifier = self.classifier_map[p]
+        #     ranges.append([classifier["range"][0], classifier["range"][1]])
+        #     mask[classifier["range"][0] : classifier["range"][1]] = 1
+
+    def pad_id(self):
+        return 0

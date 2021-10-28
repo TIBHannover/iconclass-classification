@@ -434,7 +434,7 @@ class CocoDataloader:
                     ontology=self.ontology,
                     random_trace=self.train_random_trace,
                     merge_one_hot=self.train_merge_one_hot,
-                    max_traces=None,
+                    max_traces=1,
                 ),
             ]
         )

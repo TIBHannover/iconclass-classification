@@ -143,17 +143,21 @@ class AttnRNNLevelWiseDecoder(nn.Module):
         hidden = self.model.init_hidden_state(context_vec)
 
         x = torch.ones([context_vec.shape[0], 1], dtype=torch.int64).to(context_vec.device.index)
-        x = torch.repeat_interleave(x, k, dim=0)
+        # x = torch.repeat_interleave(x, k, dim=0)
         bsearch = BeamSearchScorer(batch_size, k, len(ontology), context_vec.device.index, x, self.mapper)
 
         # exit()
+        outputs = []
 
         for i_lev in range(len(ontology)):
 
             pred, hidden, _ = self.model(x[:, i_lev], context_vec, hidden, i_lev)
 
-            x, beam_id = bsearch.process(x, pred, i_lev)
+            x, beam_id, pred = bsearch.process(x, pred, i_lev)
+            outputs.append(pred)
             print(x)
+
+        return outputs
 
     # def test(self, context_vec, src, k, ontology):
     #     batch_size = context_vec.shape[0]

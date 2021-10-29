@@ -70,8 +70,8 @@ class BeamSearchScorer:
         self._beam_hyps = [BeamHypotheses(max_length=max_length, num_beams=self.num_beams) for _ in range(batch_size)]
 
         self.local_seq_src = torch.ones(src.shape, dtype=torch.int64).to(device)
-        self.beam_scores = torch.zeros((batch_size, num_beams)).to(device)
-        self.beam_scores[:, 1:] = -1e9
+        self.beam_scores = torch.ones((batch_size, num_beams)).to(device)
+        # self.beam_scores[:, 1:] = -1e9
         self.beam_scores = self.beam_scores.view(-1)
         self.done = [False for _ in range(batch_size)]
         self.mapper = mapper
@@ -107,14 +107,26 @@ class BeamSearchScorer:
         print("################## FLAT")
         next_token_scores_flat = self.mapper.to_flat(next_token_scores, i_lev, remove_tokens=True)
         next_token_scores_flat = next_token_scores_flat * mask.to(next_token_scores_flat.device)
+        result_pred = next_token_scores_flat
         print(next_token_scores_flat.shape)
         print(next_token_scores_flat)
         print("################## FLAT PADDED")
-        next_token_scores = torch.cat([next_token_scores[..., :2], next_token_scores_flat], dim=1)
+        next_token_scores = torch.cat(
+            [
+                next_token_scores[..., :1],
+                torch.zeros([next_token_scores.shape[0], 1], device=next_token_scores.device),
+                next_token_scores_flat,
+            ],
+            dim=1,
+        )
         print(next_token_scores.shape)
         print(next_token_scores)
         print(self.beam_scores[:, None])
-        next_scores = next_token_scores  # + self.beam_scores[:, None].expand_as(next_token_scores)
+
+        print("****************** probs")
+        print(next_token_scores)
+        next_scores = next_token_scores * self.beam_scores[:, None].expand_as(next_token_scores)
+        print(next_scores)
         next_scores = next_scores.view(self.batch_size, self.num_beams * next_token_scores.shape[1])
         next_scores, next_tokens = torch.topk(
             next_scores, next_token_scores.shape[1] * self.num_beams, dim=1, largest=True, sorted=True
@@ -138,8 +150,14 @@ class BeamSearchScorer:
             print("#######################+++++++++")
             print(batch_idx)
             if self.done[batch_idx]:
-                # print("problem 1")
-                next_batch_beam.extend([0, self.mapper.pad_id(), 0])
+                print("problem 1")
+                next_batch_beam.append(
+                    (
+                        torch.tensor(0, device=next_scores.device),
+                        torch.tensor(self.mapper.pad_id(), dtype=torch.int64, device=next_scores.device),
+                        torch.tensor(0, dtype=torch.int64, device=next_scores.device),
+                    )
+                )
                 continue
             next_sent_beam = []  # save triples(beam_token_scores)
             for beam_token_rank, (beam_token_id, beam_token_score) in enumerate(
@@ -169,8 +187,11 @@ class BeamSearchScorer:
                 # else:
                 #     continue
 
-            print(next_sent_beam)
             next_batch_beam.extend(next_sent_beam)
+        print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+        print(src)
+        print(next_sent_beam)
+        print(next_batch_beam)
         beam_idx = src.new([x[2] for x in next_batch_beam])
 
         src = src[beam_idx, :]
@@ -187,10 +208,9 @@ class BeamSearchScorer:
         # src = torch.cat((src, torch.tensor(self.local_seq_src, dtype=torch.int64).to(src.device.index)), dim=1)
         # hidden = hidden[src[:,i_lev]] #TODO should we change the order of hidden state according to winning beams?
         src = self.local_seq_src
-        print(src)
         self.beam_scores = self.beam_scores.new([x[0] for x in next_batch_beam])
-        input()
-        return src, beam_idx
+
+        return src, beam_idx, result_pred
 
         # device = input_ids.device
         # next_beam_scores = torch.zeros((batch_size, self.group_size), dtype=next_scores.dtype, device=device)

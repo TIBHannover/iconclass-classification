@@ -140,7 +140,7 @@ class EncoderHierarchicalDecoder(BaseModel):
         self.fbeta = FBetaMetric(num_classes=len(self.mapping_config))
         self.map = MAPMetric(num_classes=len(self.mapping_config))
 
-        self.beam_size = 1
+        self.beam_size = 2
 
     def forward(self, x):
         return x
@@ -349,7 +349,7 @@ class EncoderHierarchicalDecoder(BaseModel):
         image_embedding = self.encoder(image)
 
         decoder_result = self.decoder.test_final(image_embedding, self.beam_size, self.ontology)
-
+        print(decoder_result)
         exit()
         # # increase batchsize if we have more than one trace
         # image_embedding = torch.repeat_interleave(image_embedding, src.shape[1], dim=0)

@@ -142,3 +142,5 @@ slurm-*
 .vscode/
 wandb/
 *.out
+lightning_logs/
+logs/

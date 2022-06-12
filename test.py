@@ -100,7 +100,7 @@ def main():
     model.freeze()
     model.eval()
 
-    print(trainer.test(model, test_dataloaders=dataset.test()))
+    print(trainer.test(model, dataloaders=dataset.test()))
 
     return 0
 

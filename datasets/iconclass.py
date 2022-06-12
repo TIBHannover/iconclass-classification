@@ -20,7 +20,7 @@ from datasets.pipeline import (
     split_chunk_by_nodes,
     split_chunk_by_workers,
 )
-from datasets.utils import read_jsonl
+from datasets.utils import read_line_data
 
 from datasets.pad_collate import PadCollate
 
@@ -91,17 +91,17 @@ class IconclassDataloader:
         self.train_annotation = {}
         if self.train_annotation_path is not None:
             for path in self.train_annotation_path:
-                self.train_annotation.update(read_jsonl(path, dict_key="id"))
+                self.train_annotation.update(read_line_data(path, dict_key="id"))
 
         self.val_annotation = {}
         if self.val_annotation_path is not None:
             # for path in self.val_annotation_path:
-            self.val_annotation.update(read_jsonl(self.val_annotation_path, dict_key="id"))
+            self.val_annotation.update(read_line_data(self.val_annotation_path, dict_key="id"))
 
         self.test_annotation = {}
         if self.test_annotation_path is not None:
             # for path in self.test_annotation_path:
-            self.test_annotation.update(read_jsonl(self.test_annotation_path, dict_key="id"))
+            self.test_annotation.update(read_line_data(self.test_annotation_path, dict_key="id"))
 
     def train_image_pipeline(self):
         print(self.train_random_sizes)
@@ -230,7 +230,7 @@ class IconclassDataloader:
         #     transforms,
         #     min_size=self.val_filter_min_dim,
         # )
-        
+
         pipeline = [torchvision.transforms.ToPILImage(), RandomResize([self.test_size], max_size=self.max_size)]
 
         if self.use_center_crop:
@@ -238,7 +238,7 @@ class IconclassDataloader:
                 torchvision.transforms.Resize(self.test_size, interpolation=Image.BICUBIC),
                 torchvision.transforms.CenterCrop(self.test_size),
             ]
-            
+
         pipeline += [
             torchvision.transforms.ToTensor(),
             torchvision.transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
@@ -249,8 +249,6 @@ class IconclassDataloader:
             min_size=self.val_filter_min_dim,
         )
 
-        
-        
     def test_decode_pieline(self):
         return SequencePipeline(
             [

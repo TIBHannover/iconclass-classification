@@ -14,7 +14,7 @@ import json
 sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), ".."))
 
 from datasets import DatasetsManager
-from datasets.utils import read_jsonl
+from datasets.utils import read_line_data
 
 
 def parse_args():
@@ -43,7 +43,7 @@ def main():
 
     dataset = DatasetsManager().build_dataset(name=args.dataset, args=args)
 
-    mapping_list = read_jsonl(args.input_mapping_path)
+    mapping_list = read_line_data(args.input_mapping_path)
     print(mapping_list[100])
     with open(args.output_path, "w") as f:
         label_sum_yolo = None

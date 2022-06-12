@@ -8,8 +8,10 @@ from models.utils import linear_rampup, cosine_rampdown
 
 from models.utils import str2bool
 
+from utils.log import LoggingHandler
 
-class BaseModel(LightningModule):
+
+class BaseModel(LightningModule, LoggingHandler):
     def __init__(self, args=None, **kwargs):
         super(BaseModel, self).__init__()
         if args is not None:
@@ -34,12 +36,11 @@ class BaseModel(LightningModule):
 
         self.gamma = dict_args.get("gamma", None)
         self.step_size = dict_args.get("step_size", None)
-        
+
         # self.finetune_hierarchy_level = dict_args.get("finetune_hierarchy_level", None)
 
-
     def on_train_start(self):
-        print(f"Keys: {self.dict_args.keys()}")
+        # print(f"Keys: {self.dict_args.keys()}")
         self.logger.log_hyperparams(self.dict_args)
 
     @classmethod
@@ -60,9 +61,9 @@ class BaseModel(LightningModule):
 
         parser.add_argument("--gamma", default=0.5, type=float)
         parser.add_argument("--step_size", default=10000, type=int)
-        
+
         parser.add_argument("--finetune_hierarchy_level", type=int)
-        
+
         return parser
 
     def configure_optimizers(self):
@@ -71,13 +72,13 @@ class BaseModel(LightningModule):
                 "(bn|gn)(\d+)?.(weight|bias)": dict(weight_decay=0.0, lars_exclude=True),
                 "bias": dict(weight_decay=0.0, lars_exclude=True),
             }
-            
+
             # if self.finetune_hierarchy_level is not None:
             #     for name, param in model.named_parameters():
             #         # print(name)
             #         if not re.search(f'(decoder.[^.]+)\.({self.finetune_hierarchy_level})\.(.)*', name):
             #             param.requires_grad = False
-            
+
             if parameterwise is None:
                 params = model.parameters()
 
@@ -96,7 +97,7 @@ class BaseModel(LightningModule):
 
                     # otherwise use the global settings
                     params.append(param_group)
-    
+
             if type.lower() == "sgd":
                 return torch.optim.SGD(params=params, **kwargs)
 

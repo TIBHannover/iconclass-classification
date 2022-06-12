@@ -32,8 +32,8 @@ class ProgressPrinter(pl.callbacks.ProgressBarBase):
         self.enabled = False
 
     @rank_zero_only
-    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx):
-        super().on_train_batch_end(trainer, pl_module, outputs, batch, batch_idx, dataloader_idx)
+    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
+        super().on_train_batch_end(trainer, pl_module, outputs, batch, batch_idx)
         # print(f"TRAIN_BATCH_END {self.refresh_rate}")
         if self.is_enabled and self.trainer.global_step % self.refresh_rate == 0:
             progress_bar_dict = copy.deepcopy(trainer.progress_bar_dict)

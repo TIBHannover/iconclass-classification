@@ -22,7 +22,7 @@ import json
 sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), ".."))
 
 from datasets import DatasetsManager
-from datasets.utils import read_jsonl
+from datasets.utils import read_line_data
 
 
 def parse_args():

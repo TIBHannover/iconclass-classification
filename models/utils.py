@@ -162,34 +162,35 @@ def check_seq_path(token_id, seq, mapping_global_indexes):
 class HierarchicalLevelMapper:
     def __init__(self, mapping: List, classifier: List) -> None:
         self.level_map = build_level_map(mapping)
+        # print(classifier)
         self.mapping_map = {x["index"]: x for x in mapping}
-        self.classifier_map = {x["id"]: x for x in classifier}
+        self.classifier_map = {x["index"]: x for x in classifier}
 
     def to_flat(self, ontology: Tensor, level: int, remove_tokens: bool = True) -> Tensor:
-        print("####")
-        print(ontology.shape)
+        # print("####")
+        # print(ontology.shape)
         if remove_tokens:
             ontology = ontology[..., 2:]
-        print(ontology.shape)
-        print(f"level_map {self.level_map.shape}")
-        print(self.level_map.shape[-1])
+        # print(ontology.shape)
+        # print(f"level_map {self.level_map.shape}")
+        # print(self.level_map.shape[-1])
         mapping = torch.arange(self.level_map.shape[-1])
 
         m = mapping[self.level_map == level]
-        print(f"mapping")
-        print(mapping.shape)
-        print(mapping)
-        print(m)
-        print(m.shape)
-        print(m)
+        # print(f"mapping")
+        # print(mapping.shape)
+        # print(mapping)
+        # print(m)
+        # print(m.shape)
+        # print(m)
         flat = torch.zeros(*ontology.shape[:-1], self.level_map.shape[-1], dtype=ontology.dtype, device=ontology.device)
-        print(flat.shape)
+        # print(flat.shape)
         flat[..., m] = ontology
 
         return flat
 
     def classifier_mask_from_parent(self, classifiers: Union[List[int], LongTensor], remove_tokens: bool = True):
-        print(classifiers)
+        # print(classifiers)
         if isinstance(classifiers, Tensor):
             classifiers = classifiers.cpu().detach().numpy().tolist()
         result = []
@@ -224,3 +225,11 @@ class HierarchicalLevelMapper:
 
     def pad_id(self):
         return 0
+
+
+class HierarchicalUnroller:
+    def __init__(self):
+        pass
+
+    def __call__(self):
+        pass

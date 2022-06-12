@@ -22,7 +22,7 @@ from datasets.pipeline import (
     ImagePipeline,
     ConcatPipeline,
 )
-from datasets.utils import read_jsonl
+from datasets.utils import read_line_data
 
 from datasets.iconclass import IconclassDataloader
 
@@ -65,14 +65,14 @@ class IconclassFlattenDataloader(IconclassDataloader):
         self.mapping = {}
         mm = {}
         if self.mapping_path is not None:
-            mm = read_jsonl(self.mapping_path, dict_key="id")
+            mm = read_line_data(self.mapping_path, dict_key="id")
             for k, v in mm.items():
                 if v["count"] > self.filter_label_by_count:
                     self.mapping[k] = v
 
         self.classifier = {}
         if self.classifier_path is not None:
-            self.classifier = read_jsonl(self.classifier_path)
+            self.classifier = read_line_data(self.classifier_path)
 
     def train_mapping_pipeline(self):
         return IconclassFlattenDecoderPipeline(mapping=self.mapping, classifier=self.classifier)

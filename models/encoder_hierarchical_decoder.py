@@ -1,12 +1,4 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Created on Thu Jul 22 12:53:27 2021
-
-@author: javad
-"""
-
-
+import os
 import argparse
 import logging
 import typing_extensions
@@ -27,13 +19,15 @@ from models.models import ModelsManager
 
 from models.base_model import BaseModel
 from models.utils import gen_filter_mask
-from datasets.utils import read_jsonl
+from datasets.utils import read_line_data
 
 from models.loss import FocalBCEWithLogitsLoss
 from encoders import EncodersManager
 from decoders import DecodersManager
 
 from metrics import FBetaMetric, MAPMetric
+from torchmetrics import CosineSimilarity, JaccardIndex
+
 
 from models import utils
 
@@ -72,15 +66,15 @@ class EncoderHierarchicalDecoder(BaseModel):
         self.mapping_config = []
         self.mask_vec = []
         if self.mapping_path is not None:
-            self.mapping_config = read_jsonl(self.mapping_path)
+            self.mapping_config = read_line_data(self.mapping_path)
 
         self.classifier = []
         if self.classifier_path is not None:
-            self.classifier = read_jsonl(self.classifier_path)
+            self.classifier = read_line_data(self.classifier_path)
 
         self.ontology = []
         if self.ontology_path is not None:
-            self.ontology = read_jsonl(self.ontology_path)
+            self.ontology = read_line_data(self.ontology_path)
 
         if self.filter_label_by_count is not None:
             self.filter_mask = torch.tensor(
@@ -137,15 +131,18 @@ class EncoderHierarchicalDecoder(BaseModel):
             )
         else:
             self.loss = torch.nn.BCEWithLogitsLoss(reduction="none")
-        self.fbeta = FBetaMetric(num_classes=len(self.mapping_config))
-        self.map = MAPMetric(num_classes=len(self.mapping_config))
+        # self.fbeta = FBetaMetric(num_classes=len(self.mapping_config))
+        # self.map = MAPMetric(num_classes=len(self.mapping_config))
 
-        self.beam_size = 2
+        self.jaccard = JaccardIndex(num_classes=len(self.mapping_config), multilabel=True)
+        self.cosine = CosineSimilarity(reduction="mean")
 
     def forward(self, x):
         return x
 
     def training_step(self, batch, batch_idx):
+        # print(f"########## {batch_idx}")
+        # print(f"{os.environ.get('LOCAL_RANK')} {batch.get('id')[:5]}")
         image = batch["image"]
         target = batch["ontology_target"]
 
@@ -161,6 +158,29 @@ class EncoderHierarchicalDecoder(BaseModel):
         tgt_level_with_tokens = utils.add_sequence_tokens_to_level_ontology_target(tgt_level, mask_level)
         mask_level_with_tokens = utils.add_sequence_tokens_to_level_ontology(mask_level)
 
+        # print("###target")
+        # print(target)
+        # print(target.shape)
+        # print("###flat_target")
+        # print(flat_target)
+        # print(flat_target.shape)
+        # print("###trace_mask")
+        # print(trace_mask)
+        # print(trace_mask.shape)
+        # print("###mask_level")
+        # print(mask_level)
+        # print([print(x.shape) for x in mask_level])
+        # print("###src_level_with_tokens")
+        # print(src_level_with_tokens)
+        # print([print(x.shape) for x in src_level_with_tokens])
+        # print("###tgt_level_with_tokens")
+        # print(tgt_level_with_tokens)
+        # print([print(x.shape) for x in tgt_level_with_tokens])
+        # print("###mask_level_with_tokens")
+        # print(mask_level_with_tokens)
+        # print([print(x.shape) for x in mask_level_with_tokens])
+
+        # exit()
         self.image = image
         # image = F.interpolate(image, size = (299,299), mode= 'bicubic', align_corners=False)
         # forward image
@@ -290,8 +310,10 @@ class EncoderHierarchicalDecoder(BaseModel):
 
             # print(trace_flat_prediction[0, :20])
             # print(trace_flat_target[0, :20])
-        self.fbeta(trace_flat_prediction, trace_flat_target)
-        self.map(trace_flat_prediction, trace_flat_target)
+        # self.jaccard.update(trace_flat_prediction, trace_flat_target.int())
+        self.cosine.update(trace_flat_prediction, trace_flat_target.int())
+        # self.fbeta(trace_flat_prediction, trace_flat_target)
+        # self.map(trace_flat_prediction, trace_flat_target)
 
         return {"loss": torch.mean(loss)}
 
@@ -309,19 +331,24 @@ class EncoderHierarchicalDecoder(BaseModel):
         filter_mask = self.filter_mask
         self.log("val/filter", torch.sum(filter_mask))
 
-        logging.info("EncoderHierarchicalDecoder::validation_epoch_end -> fbeta")
-        fbeta = self.fbeta.compute()
-        for thres, value in fbeta.items():
-            self.log(f"val/fbeta-{thres}", self.fbeta.mean(value, filter_mask))
+        # logging.info("EncoderHierarchicalDecoder::validation_epoch_end -> fbeta")
+        # fbeta = self.fbeta.compute()
+        # for thres, value in fbeta.items():
+        #     self.log(f"val/fbeta-{thres}", self.fbeta.mean(value, filter_mask))
 
-        logging.info("EncoderHierarchicalDecoder::validation_epoch_end -> map")
-        ap_scores_per_class = self.map.compute()
-        map_score = self.map.mean(ap_scores_per_class, filter_mask)
-        logging.info(f"MAP score: {map_score}")
-        self.log(f"val/map", map_score, prog_bar=True)
+        # logging.info("EncoderHierarchicalDecoder::validation_epoch_end -> map")
+        # ap_scores_per_class = self.map.compute()
+        # map_score = self.map.mean(ap_scores_per_class, filter_mask)
+        # logging.info(f"MAP score: {map_score}")
+        # self.log(f"val/map", map_score, prog_bar=True)
 
-        self.fbeta.reset()
-        self.map.reset()
+        # self.fbeta.reset()
+        # self.map.reset()
+
+        # self.log(f"val/jaccard", self.jaccard.compute())
+        self.log(f"val/cosine", self.cosine.compute(), prog_bar=True)
+        # self.jaccard.reset()
+        self.cosine.reset()
 
     def test_step(self, batch, batch_idx):
         image = batch["image"]
@@ -341,7 +368,7 @@ class EncoderHierarchicalDecoder(BaseModel):
         tgt_level_with_tokens = utils.add_sequence_tokens_to_level_ontology_target(tgt_level, mask_level)
         mask_level_with_tokens = utils.add_sequence_tokens_to_level_ontology(mask_level)
         src_level_with_tokens = src_level_with_tokens.reshape(-1, src_level_with_tokens.shape[-1])
-        print(f"Target src:{src_level_with_tokens} ")
+        # print(f"Target src:{src_level_with_tokens} ")
         self.image = image
 
         # image = F.interpolate(image, size = (299,299), mode= 'bicubic', align_corners=False)
@@ -349,8 +376,8 @@ class EncoderHierarchicalDecoder(BaseModel):
         image_embedding = self.encoder(image)
 
         decoder_result = self.decoder.test_final(image_embedding, self.beam_size, self.ontology)
-        print(decoder_result)
-        exit()
+        # print(decoder_result)
+        # exit()
         # # increase batchsize if we have more than one trace
         # image_embedding = torch.repeat_interleave(image_embedding, src.shape[1], dim=0)
 

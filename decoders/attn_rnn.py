@@ -127,7 +127,6 @@ class AttnRNNLevelWiseDecoder(nn.Module):
 
     def forward(self, context_vec, src):
         hidden = self.model.init_hidden_state(context_vec)
-        print(src)
         outputs = []
         for i_lev in range(src.shape[1]):
             pred, hidden, _ = self.model(src[:, i_lev], context_vec, hidden, i_lev)
@@ -155,7 +154,6 @@ class AttnRNNLevelWiseDecoder(nn.Module):
 
             x, beam_id, pred = bsearch.process(x, pred, i_lev)
             outputs.append(pred)
-            print(x)
 
         return outputs
 

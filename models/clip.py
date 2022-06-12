@@ -24,11 +24,10 @@ from models.models import ModelsManager
 from encoders.clip import CLIP, convert_weights
 from models.base_model import BaseModel
 from models.utils import gen_filter_mask
-from datasets.utils import read_jsonl, read_jsonl_lb_mapping
+from datasets.utils import read_line_data, read_jsonl_lb_mapping
 
 from models.loss import FocalBCEWithLogitsLoss
 
-from pytorch_lightning.core.decorators import auto_move_data
 
 from metrics import FBetaMetric, MAPMetric
 
@@ -77,7 +76,7 @@ class CLIPModel(BaseModel):
 
         self.mapping_config = []
         if self.mapping_path is not None:
-            self.mapping_config = read_jsonl(self.mapping_path)
+            self.mapping_config = read_line_data(self.mapping_path)
 
         self.filter_mask = torch.tensor(
             gen_filter_mask(self.mapping_config, self.filter_label_by_count, key="count.flat")
@@ -85,7 +84,7 @@ class CLIPModel(BaseModel):
 
         self.classifier_config = {}
         if self.classifier_path is not None:
-            self.classifier_config = read_jsonl(self.classifier_path)
+            self.classifier_config = read_line_data(self.classifier_path)
 
         if self.label_mapping_path is not None:
             self.label_mapping = read_jsonl_lb_mapping(self.label_mapping_path)

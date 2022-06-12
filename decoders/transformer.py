@@ -100,6 +100,29 @@ class TransformerLevelWiseDecoder(nn.Module):
     def reset_state(self, batch_size):
         return torch.zeros((batch_size, self.attention_dim))
 
+    def test_final(self, context_vec, ontology, threshold=0.5, max_traces=10):
+        batch_size = context_vec.shape[0]
+        # expand to beam size
+        context_vec = torch.repeat_interleave(context_vec, k, dim=0)
+        hidden = self.model.init_hidden_state(context_vec)
+
+        x = torch.ones([context_vec.shape[0], 1], dtype=torch.int64).to(context_vec.device.index)
+        # x = torch.repeat_interleave(x, k, dim=0)
+        bsearch = BeamSearchScorer(batch_size, k, len(ontology), context_vec.device.index, x, self.mapper)
+
+        # exit()
+        outputs = []
+
+        for i_lev in range(len(ontology)):
+
+            pred, hidden, _ = self.model(x[:, i_lev], context_vec, hidden, i_lev)
+
+            x, beam_id, pred = bsearch.process(x, pred, i_lev)
+            outputs.append(pred)
+            print(x)
+
+        return outputs
+
     @classmethod
     def add_args(cls, parent_parser):
         logging.info("Add FlatDecoder args")

@@ -15,7 +15,7 @@ from datasets.pipeline import (
     MapDataset,
 )
 
-from datasets.utils import read_jsonl
+from datasets.utils import read_line_data
 
 # from models.utils import build_level_map
 from datasets.image_pipeline import (
@@ -306,17 +306,17 @@ class CocoDataloader:
         self.train_annotation = {}
         if self.train_annotation_path is not None:
             for path in self.train_annotation_path:
-                self.train_annotation.update(read_jsonl(path, dict_key="id"))
+                self.train_annotation.update(read_line_data(path, dict_key="id"))
 
         self.val_annotation = {}
         if self.val_annotation_path is not None:
             # for path in self.val_annotation_path:
-            self.val_annotation.update(read_jsonl(self.val_annotation_path, dict_key="id"))
+            self.val_annotation.update(read_line_data(self.val_annotation_path, dict_key="id"))
 
         self.test_annotation = {}
         if self.test_annotation_path is not None:
             # for path in self.test_annotation_path:
-            self.test_annotation.update(read_jsonl(self.test_annotation_path, dict_key="id"))
+            self.test_annotation.update(read_line_data(self.test_annotation_path, dict_key="id"))
 
         self.mapping_path = dict_args.get("mapping_path", None)
         self.classifier_path = dict_args.get("classifier_path", None)
@@ -325,15 +325,15 @@ class CocoDataloader:
 
         self.mapping = {}
         if self.mapping_path is not None:
-            self.mapping = read_jsonl(self.mapping_path, dict_key="id")
+            self.mapping = read_line_data(self.mapping_path, dict_key="id")
 
         self.classifier = []
         if self.classifier_path is not None:
-            self.classifier = read_jsonl(self.classifier_path)
+            self.classifier = read_line_data(self.classifier_path)
 
         self.ontology = []
         if self.ontology_path is not None:
-            self.ontology = read_jsonl(self.ontology_path)
+            self.ontology = read_line_data(self.ontology_path)
 
         self.max_traces = dict_args.get("max_traces", None)
 

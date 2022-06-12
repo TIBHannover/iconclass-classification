@@ -26,9 +26,6 @@ class FlatDecoder(nn.Module):
         self.in_features = in_features
         self.out_features = out_features
 
-        print(self.in_features)
-        print(self.out_features)
-
         self.dropout1 = torch.nn.Dropout(self.decoder_dropout)
         if self.decoder_hidden_dim is not None and self.decoder_hidden_dim > 0:
             self.fc = torch.nn.Linear(self.in_features, self.decoder_hidden_dim)

@@ -23,10 +23,15 @@ from packaging import version
 
 import json
 
-try: 
+try:
     import yaml
 except:
     yaml = None
+
+from utils import get_node_rank
+
+# logger = logging.getLogger()
+# logger = logging.LoggerAdapter(logger, {"rank": get_node_rank()})
 
 
 def parse_args():
@@ -38,30 +43,33 @@ def parse_args():
     level = logging.ERROR
     if args[0].verbose:
         level = logging.INFO
-
-    logging.basicConfig(format="%(asctime)s %(levelname)s: %(message)s", datefmt="%d-%m-%Y %H:%M:%S", level=level)
+    logging.basicConfig(
+        format=f"%(asctime)s rank:{get_node_rank()}  %(filename)s::[%(name)s::%(funcName)s] -> %(message)s",
+        datefmt="%d-%m-%Y %H:%M:%S",
+        level=level,
+    )
 
     # parse config
     parser.add_argument("-c", "--config_path", help="verbose output")
 
     args = parser.parse_known_args()
     if args[0].config_path:
-        if re.match('^.*?\.(yml|yaml)$',args[0].config_path):
-            with open(args[0].config_path, 'r') as f:
+        if re.match("^.*?\.(yml|yaml)$", args[0].config_path):
+            with open(args[0].config_path, "r") as f:
                 data_dict = yaml.safe_load(f)
                 parser.set_defaults(**data_dict)
-    
-        if re.match('^.*?\.(json)$',args[0].config_path):
-            with open(args[0].config_path, 'r') as f:
+
+        if re.match("^.*?\.(json)$", args[0].config_path):
+            with open(args[0].config_path, "r") as f:
                 data_dict = json.load(f)
                 parser.set_defaults(**data_dict)
-    
+
     # add arguments
     parser.add_argument("--output_path", help="verbose output")
     parser.add_argument("--use_wandb", action="store_true", help="verbose output")
     parser.add_argument("--progress_refresh_rate", type=int, default=100, help="verbose output")
     parser.add_argument("--wandb_project", default="iart_iconclass", help="verbose output")
-    parser.add_argument("--wand_name", help="verbose output")
+    parser.add_argument("--wandb_name", help="verbose output")
     parser.add_argument("--checkpoint_save_interval", type=int, default=2000, help="verbose output")
     parser = pl.Trainer.add_argparse_args(parser)
     parser = DatasetsManager.add_args(parser)
@@ -69,16 +77,15 @@ def parse_args():
     args = parser.parse_args()
 
     # write results
-    
+
     if args.output_path:
         os.makedirs(args.output_path, exist_ok=True)
         if yaml is not None:
-            with open(os.path.join(args.output_path, 'config.yaml'), 'w') as f:
+            with open(os.path.join(args.output_path, "config.yaml"), "w") as f:
                 yaml.dump(vars(args), f, indent=4)
 
-        with open(os.path.join(args.output_path, 'config.json'), 'w') as f:
+        with open(os.path.join(args.output_path, "config.json"), "w") as f:
             json.dump(vars(args), f, indent=4)
-
 
     return args
 
@@ -88,8 +95,8 @@ def main():
 
     pl.seed_everything(42)
 
+    print()
     dataset = DatasetsManager().build_dataset(name=args.dataset, args=args)
-
     model = ModelsManager().build_model(name=args.model, args=args)
 
     if args.output_path is not None:
@@ -97,14 +104,14 @@ def main():
 
     callbacks = [
         ProgressPrinter(refresh_rate=args.progress_refresh_rate),
-        pl.callbacks.LearningRateMonitor(),
+        # pl.callbacks.LearningRateMonitor(),
     ]
 
-    if args.output_path is not None and not args.use_wandb:
-        logger = TensorBoardLogger(save_dir=args.output_path, name="summary")
+    # if args.output_path is not None and not args.use_wandb:
+    #     logger = TensorBoardLogger(save_dir=args.output_path, name="summary")
 
-        callbacks.extend([TensorBoardLogImageCallback])
-    elif args.use_wandb:
+    #     callbacks.extend([TensorBoardLogImageCallback])
+    if args.use_wandb:
         name = f"{args.model}"
         if hasattr(args, "encoder"):
             name += f"-{args.encoder}"
@@ -112,8 +119,8 @@ def main():
             name += f"-{args.decoder}"
         name += f"-{uuid.uuid4().hex[:4]}"
 
-        if args.wand_name is not None:
-            name = args.wand_name
+        if args.wandb_name is not None:
+            name = args.wandb_name
         logger = WandbLogger(project=args.wandb_project, log_model=False, name=name)
         logger.watch(model)
         # callbacks.extend([WandbLogImageCallback()])
@@ -139,12 +146,14 @@ def main():
 
     trainer = pl.Trainer.from_argparse_args(
         args,
+        # callbacks=[ProgressPrinter(refresh_rate=args.progress_refresh_rate)]
         callbacks=callbacks,
-        logger=logger,
-        # checkpoint_callback=checkpoint_callback,
+        # logger=logger,
+        enable_checkpointing=checkpoint_callback,
+        # enable_progress_bar=False,
     )
-
-    trainer.fit(model, train_dataloader=dataset.train(), val_dataloaders=dataset.val())
+    logging.info("Start training")
+    trainer.fit(model, train_dataloaders=dataset.train(), val_dataloaders=dataset.val())
 
     return 0
 

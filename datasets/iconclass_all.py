@@ -10,7 +10,7 @@ from datasets.pipeline import (
     Pipeline,
     MapDataset,
 )
-from datasets.utils import read_jsonl
+from datasets.utils import read_line_data
 from datasets.iconclass import IconclassDataloader
 
 
@@ -212,15 +212,15 @@ class IconclassAllDataloader(IconclassDataloader):
 
         self.mapping = {}
         if self.mapping_path is not None:
-            self.mapping = read_jsonl(self.mapping_path, dict_key="id")
+            self.mapping = read_line_data(self.mapping_path, dict_key="id")
 
         self.classifier = []
         if self.classifier_path is not None:
-            self.classifier = read_jsonl(self.classifier_path)
+            self.classifier = read_line_data(self.classifier_path)
 
         self.ontology = []
         if self.ontology_path is not None:
-            self.ontology = read_jsonl(self.ontology_path)
+            self.ontology = read_line_data(self.ontology_path)
 
         self.max_traces = dict_args.get("max_traces", None)
 

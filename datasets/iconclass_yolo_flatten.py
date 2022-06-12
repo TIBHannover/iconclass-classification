@@ -23,7 +23,7 @@ from datasets.pipeline import (
     ImagePipeline,
     ConcatPipeline,
 )
-from datasets.utils import read_jsonl
+from datasets.utils import read_line_data
 
 
 from datasets.iconclass import IconclassDataloader
@@ -85,11 +85,11 @@ class IconclassYoloFlattenDataloader(IconclassDataloader):
 
         self.mapping = {}
         if self.mapping_path is not None:
-            self.mapping = read_jsonl(self.mapping_path, dict_key="id")
+            self.mapping = read_line_data(self.mapping_path, dict_key="id")
 
         self.classifier = {}
         if self.classifier_path is not None:
-            self.classifier = read_jsonl(self.classifier_path)
+            self.classifier = read_line_data(self.classifier_path)
 
     def train_mapping_pipeline(self):
         return IconclassYoloFlattenDecoderPipeline(mapping=self.mapping, classifier=self.classifier)

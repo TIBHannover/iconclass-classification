@@ -32,18 +32,21 @@ import pandas as pd
 import pickle
 
 from metrics import FBetaMetric, MAPMetric
-from torchmetrics import CosineSimilarity, JaccardIndex
+
+# from metrics.utils import fbeta_cpu, map_cpu
 
 
-@ModelsManager.export("encoder_yolo_decoder")
-class EncoderYoloDecoder(BaseModel):
+@ModelsManager.export("encoder_flat_decoder")
+class EncoderFlatDecoder(BaseModel):
     def __init__(self, args=None, **kwargs):
-        super(EncoderYoloDecoder, self).__init__(args, **kwargs)
+        super(EncoderFlatDecoder, self).__init__(args, **kwargs)
         if args is not None:
             dict_args = vars(args)
             dict_args.update(kwargs)
         else:
             dict_args = kwargs
+
+        logging.info(f"Params: {dict_args}")
 
         self.encoder_model = dict_args.get("encoder_model", None)
         self.pretrained = dict_args.get("pretrained", None)
@@ -106,17 +109,15 @@ class EncoderYoloDecoder(BaseModel):
         else:
             self.loss = torch.nn.BCEWithLogitsLoss(reduction="none", pos_weight=self.weights)
 
-        # self.fbeta = FBetaMetric(num_classes=len(self.mapping_config))
-        # self.map = MAPMetric(num_classes=len(self.mapping_config))
-        self.cosine = CosineSimilarity(reduction="mean")
+        self.fbeta = FBetaMetric(num_classes=len(self.mapping_config))
+        self.map = MAPMetric(num_classes=len(self.mapping_config))
 
     def forward(self, x):
         return x
 
     def training_step(self, batch, batch_idx):
         image = batch["image"]
-        target = batch["yolo_target"]
-        classes_mask = batch["yolo_target_mask"]
+        target = batch["flat_target"]
 
         self.image = image
         # image = F.interpolate(image, size = (299,299), mode= 'bicubic', align_corners=False)
@@ -129,15 +130,18 @@ class EncoderYoloDecoder(BaseModel):
         weights = self.weights.to(decoder_result.device)
         filter_mask = self.filter_mask.to(decoder_result.device)
 
-        loss = self.loss(decoder_result, target) * weights * filter_mask * classes_mask
+        loss = self.loss(decoder_result, target) * weights * filter_mask
 
-        self.log("train/loss", torch.sum(loss) / torch.sum(filter_mask * classes_mask))
+        self.log("train/loss", torch.sum(loss) / torch.sum(filter_mask))
         return {"loss": torch.mean(loss)}
+
+    # def on_validation_epoch_start(self):
+    #     self.all_predictions = []
+    #     self.all_targets = []
 
     def validation_step(self, batch, batch_idx):
         image = batch["image"]
-        target = batch["yolo_target"]
-        classes_mask = batch["yolo_target_mask"]
+        target = batch["flat_target"]
 
         self.image = image
         # image = F.interpolate(image, size = (299,299), mode= 'bicubic', align_corners=False)
@@ -150,16 +154,21 @@ class EncoderYoloDecoder(BaseModel):
 
         weights = self.weights.to(decoder_result.device)
         filter_mask = self.filter_mask.to(decoder_result.device)
-        loss = self.loss(decoder_result, target) * weights * filter_mask * classes_mask
+        loss = self.loss(decoder_result, target) * weights * filter_mask  # * self.weights
 
-        # self.fbeta(torch.sigmoid(logits), target)
-        # self.map(torch.sigmoid(logits), target)
-        self.cosine.update(torch.sigmoid(logits), target.int())
+        self.fbeta(torch.sigmoid(logits), target)
+        self.map(torch.sigmoid(logits), target)
+
+        # tt = target.detach().cpu().numpy()
+        # pp = torch.sigmoid(logits).detach().cpu().numpy()
+
+        # self.all_targets.append(tt)
+        # self.all_predictions.append(pp)
 
         return {"loss": torch.sum(loss) / torch.sum(filter_mask)}
 
     def validation_epoch_end(self, outputs):
-        logging.info("EncoderYoloDecoder::validation_epoch_end")
+        logging.info("EncoderFlatDecoder::validation_epoch_end")
 
         loss = 0.0
         count = 0
@@ -172,28 +181,26 @@ class EncoderYoloDecoder(BaseModel):
         filter_mask = self.filter_mask
         self.log("val/filter", torch.sum(filter_mask))
 
-        # logging.info("EncoderYoloDecoder::validation_epoch_end -> fbeta")
-        # fbeta = self.fbeta.compute()
-        # for thres, value in fbeta.items():
-        #     self.log(f"val/fbeta-{thres}", self.fbeta.mean(value, filter_mask))
+        logging.info("EncoderFlatDecoder::validation_epoch_end -> fbeta")
+        fbeta = self.fbeta.compute()
+        # fbeta = fbeta_cpu(self.all_predictions,self.all_targets,
+        #                   len(self.mapping_config), mask = filter_mask)
+        for thres, value in fbeta.items():
+            self.log(f"val/fbeta-{thres}", self.fbeta.mean(value, filter_mask))
 
-        # logging.info("EncoderYoloDecoder::validation_epoch_end -> map")
-        # ap_scores_per_class = self.map.compute()
-        # map_score = self.map.mean(ap_scores_per_class, filter_mask)
-        # logging.info(f"MAP score: {map_score}")
-        # self.log(f"val/map", map_score, prog_bar=True)
+        logging.info("EncoderFlatDecoder::validation_epoch_end -> map")
+        ap_scores_per_class = self.map.compute()
+        map_score = self.map.mean(ap_scores_per_class, filter_mask)
+        # map_score = map_cpu(self.all_targets, self.all_predictions, mask =filter_mask.numpy() )
+        logging.info(f"MAP score: {map_score}")
+        self.log(f"val/map", map_score, prog_bar=True)
 
-        # self.fbeta.reset()
-        # self.map.reset()
-
-        # self.log(f"val/jaccard", self.jaccard.compute())
-        self.log(f"val/cosine", self.cosine.compute(), prog_bar=True)
-        # self.jaccard.reset()
-        self.cosine.reset()
+        self.fbeta.reset()
+        self.map.reset()
 
     @classmethod
     def add_args(cls, parent_parser):
-        logging.info("EncoderYoloDecoder::add_args")
+        logging.info("EncoderFlatDecoder::add_args")
         parent_parser = super().add_args(parent_parser)
         parent_parser = EncodersManager.add_args(parent_parser)
         parent_parser = DecodersManager.add_args(parent_parser)

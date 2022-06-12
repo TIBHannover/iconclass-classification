@@ -1,6 +1,8 @@
 import logging
+from xdrlib import Unpacker
 import torch
 import json
+import msgpack
 import torch.distributed as dist
 
 
@@ -81,14 +83,49 @@ def get_element(data_dict: dict, path: str, split_element="."):
     return elem
 
 
-def read_jsonl(path, dict_key=None, keep_keys=None):
+def read_dict_data(path: str, dict_key: str = None, keep_keys: str = None):
+    file_data = []
+    if path.endswith(".jsonl"):
+        with open(path, "r") as f:
+            return json.loads(f.read)
+
+    if path.endswith(".msg"):
+
+        with open(path, "rb") as f:
+            return msgpack.unpackb(f.read())
+
     data = []
-    with open(path, "r") as f:
-        for line in f:
-            d = json.loads(line)
-            if keep_keys is not None:
-                d = {k: get_element(d, v) for k, v in keep_keys.items()}
-            data.append(d)
+    for d in file_data:
+        if keep_keys is not None:
+            d = {k: get_element(d, v) for k, v in keep_keys.items()}
+        data.append(d)
+
+    if dict_key is not None:
+        data = {get_element(x, dict_key): x for x in data}
+
+    return data
+
+
+def read_line_data(path: str, dict_key: str = None, keep_keys: str = None):
+    file_data = []
+    if path.endswith(".jsonl"):
+        with open(path, "r") as f:
+            for line in f:
+                d = json.loads(line)
+                file_data.append(d)
+
+    if path.endswith(".msg"):
+
+        with open(path, "rb") as f:
+            u = msgpack.Unpacker(f)
+            for line in u:
+                d = json.loads(line)
+                file_data.append(d)
+    data = []
+    for d in file_data:
+        if keep_keys is not None:
+            d = {k: get_element(d, v) for k, v in keep_keys.items()}
+        data.append(d)
 
     if dict_key is not None:
         data = {get_element(x, dict_key): x for x in data}
@@ -98,7 +135,7 @@ def read_jsonl(path, dict_key=None, keep_keys=None):
 
 def write_jsonl_lb_mapping(path, outpath):
     # read icon meta file and write the mapping file
-    data = read_jsonl(path)
+    data = read_line_data(path)
     with open(outpath, mode="a") as f:
         for i in data:
             json_rec = json.dumps({i["id"]: i["kw"]})

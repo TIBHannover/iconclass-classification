@@ -36,12 +36,16 @@ class BaseModel(LightningModule, LoggingHandler):
 
         self.gamma = dict_args.get("gamma", None)
         self.step_size = dict_args.get("step_size", None)
+        self.beta1 = dict_args.get("beta1")
+        self.beta2 = dict_args.get("beta2")
+        self.eps = dict_args.get("eps")
 
         # self.finetune_hierarchy_level = dict_args.get("finetune_hierarchy_level", None)
 
     def on_train_start(self):
         # print(f"Keys: {self.dict_args.keys()}")
-        self.logger.log_hyperparams(self.dict_args)
+        if self.logger:
+            self.logger.log_hyperparams(self.dict_args)
 
     @classmethod
     def add_args(cls, parent_parser):
@@ -58,6 +62,10 @@ class BaseModel(LightningModule, LoggingHandler):
         parser.add_argument("--lr_rampup", default=2000, type=int)
         parser.add_argument("--lr_init", default=0.0, type=float)
         parser.add_argument("--lr_rampdown", default=60000, type=int)
+
+        parser.add_argument("--beta1", default=0.9, type=float)
+        parser.add_argument("--beta2", default=0.98, type=float)
+        parser.add_argument("--eps", default=1.0e-6, type=float)
 
         parser.add_argument("--gamma", default=0.5, type=float)
         parser.add_argument("--step_size", default=10000, type=int)

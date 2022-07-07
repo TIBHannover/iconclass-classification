@@ -74,7 +74,7 @@ def read_annotations(annotation_path):
     with open(annotation_path, "r") as f:
         for line in f:
             d = json.loads(line)
-            data[d["rel_path"]] = d
+            data[d["name"]] = d
     return data
 
 
@@ -92,25 +92,24 @@ def main():
     whitelist = None
     if args.annotation:
         whitelist = read_annotations(args.annotation)
-        print(list(whitelist.keys())[:10])
-
+        # print(list(whitelist.keys())[:10])
+        # exit()
         logging.info(len(image_loader))
 
         def filter_white(a):
-            match = re.match(r"^((.*?/)*([^_]*))(.*)[\.]*(\..*?)$", a["rel_path"])
-            if not match:
-                print(a["rel_path"])
-                return False
-            if match[1] + match[5] in whitelist:
+            if a["name"] in whitelist:
                 return True
-            print(a["rel_path"])
+            # print(a["rel_path"])
             return False
 
         image_loader = list(filter(filter_white, image_loader))
 
+        # print(len(image_loader))
+        # exit()
+
         for i, x in enumerate(image_loader):
-            match = re.match(r"^((.*?/)*([^_]*))(.*)[\.]*(\..*?)$", x["rel_path"])
-            image_loader[i]["id"] = whitelist[match[1] + match[5]]["id"]
+
+            image_loader[i]["id"] = whitelist[x["name"]]["id"]
 
         logging.info(len(image_loader))
 

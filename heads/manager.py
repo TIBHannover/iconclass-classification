@@ -2,8 +2,8 @@ import argparse
 import logging
 
 
-class EncodersManager:
-    _encoders = {}
+class HeadsManager:
+    _heads = {}
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -11,7 +11,7 @@ class EncodersManager:
     @classmethod
     def export(cls, name):
         def export_helper(plugin):
-            cls._encoders[name] = plugin
+            cls._heads[name] = plugin
             return plugin
 
         return export_helper
@@ -19,26 +19,29 @@ class EncodersManager:
     @classmethod
     def add_args(cls, parent_parser):
 
-        logging.info("Add EncodersManager args")
+        logging.info("Add HeadsManager args")
         parser = argparse.ArgumentParser(parents=[parent_parser], add_help=False, conflict_handler="resolve")
 
-        parser.add_argument("-e", "--encoder", help="Encoder that should be trained")
+        parser.add_argument("--heads", nargs="+", help="Heads that should be trained")
         args, _ = parser.parse_known_args()
 
-        for encoder, c in cls._encoders.items():
-            if encoder != args.encoder:
+        for head, c in cls._heads.items():
+            if head not in args.heads:
                 continue
             add_args = getattr(c, "add_args", None)
             if callable(add_args):
                 parser = add_args(parser)
         return parser
 
-    def list_encoders(self):
-        return self._encoders
+    def list_heads(self):
+        return self._heads
 
-    def build_encoder(self, name, **kwargs):
-
-        assert name in self._encoders, f"Encoder {name} is unknown"
-        return self._encoders[name](**kwargs)
+    def build_heads(self, names, **kwargs):
+        heads = []
+        for name in names:
+            assert name in self._heads, f"Head {name} is unknown"
+            heads.append(self._heads[name](**kwargs))
+        
+        return heads
 
 

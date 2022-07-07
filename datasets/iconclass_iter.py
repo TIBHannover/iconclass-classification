@@ -58,8 +58,9 @@ class IconclassIterDataloader:
         else:
             dict_args = kwargs
 
-        self.targets = dict_args.get("targets", set())
+        self.generate_targets = dict_args.get("generate_targets", set())
         self.labels_path = dict_args.get("labels_path", None)
+        self.externel_labels_path = dict_args.get("externel_labels_path", None)
 
         self.use_center_crop = dict_args.get("use_center_crop", False)
 
@@ -71,6 +72,7 @@ class IconclassIterDataloader:
 
         self.train_random_sizes = dict_args.get("train_random_sizes", None)
         self.max_size = dict_args.get("max_size", 800)
+        self.train_size = dict_args.get("train_size", 224)
 
         self.val_path = [dict_args.get("val_path", None)]
         self.val_annotation_path = dict_args.get("val_annotation_path", None)
@@ -97,6 +99,15 @@ class IconclassIterDataloader:
         self.labels = {}
         if self.labels_path is not None:
             self.labels = read_dict_data(self.labels_path)
+
+        self.externel_labels = None
+        if self.externel_labels_path is not None:
+            labels_entries = read_line_data(self.externel_labels_path)
+
+            self.externel_labels = {}
+
+            for line in labels_entries:
+                self.externel_labels[line["id"]] = line["descriptions"]
 
         self.mapping = {}
         if self.mapping_path is not None:
@@ -161,13 +172,13 @@ class IconclassIterDataloader:
         dp = dp.sharding_filter()
         dp = dp.decode_iconclass(self.train_annotation)
 
-        if "flat" in self.targets:
+        if "flat" in self.generate_targets:
             dp = dp.build_flat_target(self.mapping)
 
-        if "yolo" in self.targets:
+        if "yolo" in self.generate_targets:
             dp = dp.build_yolo_target(self.mapping, self.classifier)
 
-        if "onto" in self.targets:
+        if "ontology" in self.generate_targets:
             dp = dp.build_ontology_target(
                 mapping=self.mapping,
                 classifier=self.classifier,
@@ -180,10 +191,13 @@ class IconclassIterDataloader:
                 level_map=self.level_map,
             )
 
-        if "clip" in self.targets:
-            dp = dp.iconclass_text(labels=self.labels, shuffle=True)
+        if "clip" in self.generate_targets:
+            if self.externel_labels:
+                dp = dp.iconclass_externel_text(labels=self.externel_labels, shuffle=True)
+            else:
+                dp = dp.iconclass_text(labels=self.labels, shuffle=True)
             dp = dp.tokenize_openclip()
-        dp = dp.augment_strong_image()
+        dp = dp.augment_strong_image(output_size=self.train_size)
         dp = dp.clean_sample(
             [
                 # "name",
@@ -228,11 +242,11 @@ class IconclassIterDataloader:
         dp = dp.load_from_msg()
         dp = dp.sharding_filter()
         dp = dp.decode_iconclass(self.val_annotation)
-        if "flat" in self.targets:
+        if "flat" in self.generate_targets:
             dp = dp.build_flat_target(self.mapping)
-        if "yolo" in self.targets:
+        if "yolo" in self.generate_targets:
             dp = dp.build_yolo_target(self.mapping, self.classifier)
-        if "onto" in self.targets:
+        if "ontology" in self.generate_targets:
             dp = dp.build_ontology_target(
                 mapping=self.mapping,
                 classifier=self.classifier,
@@ -244,7 +258,11 @@ class IconclassIterDataloader:
                 max_traces=self.max_traces,
                 level_map=self.level_map,
             )
-        dp = dp.val_image()
+
+        if "clip" in self.generate_targets:
+            dp = dp.iconclass_text(labels=self.labels, shuffle=False)
+            dp = dp.tokenize_openclip()
+        dp = dp.val_image(output_size=self.val_size)
         dp = dp.clean_sample(
             [
                 "name",
@@ -280,7 +298,64 @@ class IconclassIterDataloader:
         )
 
     def test(self):
-        pass
+        dp = FileLister(root=self.test_path, recursive=True, masks="*.msg")
+        dp = dp.load_from_msg()
+        dp = dp.sharding_filter()
+        dp = dp.decode_iconclass(self.test_annotation)
+        if "flat" in self.generate_targets:
+            dp = dp.build_flat_target(self.mapping)
+        if "yolo" in self.generate_targets:
+            dp = dp.build_yolo_target(self.mapping, self.classifier)
+        if "ontology" in self.generate_targets:
+            dp = dp.build_ontology_target(
+                mapping=self.mapping,
+                classifier=self.classifier,
+                filter_label_by_count=self.filter_label_by_count,
+                ontology=self.ontology,
+                classifier_map=self.classifier_map,
+                merge_one_hot=self.train_merge_one_hot,
+                random_trace=False,
+                max_traces=self.max_traces,
+                level_map=self.level_map,
+            )
+
+        if "clip" in self.generate_targets:
+            dp = dp.iconclass_text(labels=self.labels, shuffle=False)
+            dp = dp.tokenize_openclip()
+        dp = dp.val_image(output_size=self.val_size)
+        dp = dp.clean_sample(
+            [
+                "name",
+                # "id",
+                "image_data",
+                "path",
+                "rel_path",
+                "classes",
+                "ids",
+                "all_ids",
+                "cls_ids",
+                "all_cls_ids",
+            ]
+        )
+        dp = dp.batch(self.batch_size, drop_last=True)
+        dp = dp.collate(
+            PadCollate(
+                pad_values={
+                    "image": 0.0,
+                    "image_mask": False,
+                    "parents": "#PAD",
+                    "ontology_mask": 0,
+                    "ontology_target": 0,
+                    "ontology_ranges": 0,
+                    "ontology_trace_mask": 0,
+                    "ontology_indexes": -1,
+                }
+            )
+        )
+
+        return torch.utils.data.DataLoader(
+            dp, batch_size=None, worker_init_fn=worker_init_fn, num_workers=self.num_workers, pin_memory=True
+        )
 
     @classmethod
     def add_args(cls, parent_parser):
@@ -296,6 +371,7 @@ class IconclassIterDataloader:
 
         parser.add_argument("--train_random_sizes", type=int, nargs="+", default=[480, 512, 544, 576, 608, 640])
         parser.add_argument("--max_size", type=int, default=800)
+        parser.add_argument("--train_size", type=int, default=800)
 
         parser.add_argument("--num_workers", type=int, default=4)
         parser.add_argument("--batch_size", type=int, default=32)
@@ -314,6 +390,8 @@ class IconclassIterDataloader:
         parser.add_argument("--infer_size", type=int, default=640)
 
         parser.add_argument("--labels_path", type=str)
+        parser.add_argument("--externel_labels_path", type=str)
+
         parser.add_argument("--mapping_path", type=str)
         parser.add_argument("--classifier_path", type=str)
         parser.add_argument("--ontology_path", type=str)
@@ -323,6 +401,6 @@ class IconclassIterDataloader:
 
         parser.add_argument("--train_random_trace", action="store_true")
         parser.add_argument("--train_merge_one_hot", action="store_true")
-        parser.add_argument("--targets", choices=("flat", "yolo", "clip", "onto"), nargs="+")
+        parser.add_argument("--generate_targets", choices=("flat", "yolo", "clip", "ontology"), nargs="+")
 
         return parser

@@ -15,8 +15,10 @@ from models import ModelsManager
 
 from pytorch_lightning.utilities.cloud_io import load as pl_load
 
-
+from utils import move_to_device
 import json
+import numpy as np
+import h5py
 
 try:
     import yaml
@@ -57,21 +59,13 @@ def parse_args():
     parser.add_argument("--progress_refresh_rate", type=int, default=100, help="verbose output")
     parser.add_argument("--wand_name", help="verbose output")
     parser.add_argument("--checkpoint_save_interval", type=int, default=2000, help="verbose output")
+    parser.add_argument("--prediction_path", help="verbose output")
     parser = pl.Trainer.add_argparse_args(parser)
     parser = DatasetsManager.add_args(parser)
     parser = ModelsManager.add_args(parser)
     args = parser.parse_args()
 
     # write results
-
-    if args.output_path:
-        os.makedirs(args.output_path, exist_ok=True)
-        if yaml is not None:
-            with open(os.path.join(args.output_path, "config.yaml"), "w") as f:
-                yaml.dump(vars(args), f, indent=4)
-
-        with open(os.path.join(args.output_path, "config.json"), "w") as f:
-            json.dump(vars(args), f, indent=4)
 
     return args
 
@@ -100,7 +94,68 @@ def main():
     model.freeze()
     model.eval()
 
-    print(trainer.test(model, dataloaders=dataset.test()))
+    device = "cpu"
+    if torch.cuda.is_available():
+        device = "cuda"
+    model.to(device)
+
+    if args.output_path:
+        os.makedirs(args.output_path, exist_ok=True)
+
+    prediction_file = None
+    if args.prediction_path:
+        prediction_file = h5py.File(args.prediction_path, "w")
+
+    h5_datasets = {}
+    test_dataloader = dataset.test()
+    index = 0
+    model.on_test_epoch_start()
+    for i, sample in enumerate(test_dataloader):
+        sample_gpu = move_to_device(sample, device)
+        prediction = model.test_step(sample_gpu, i)
+        prediction = move_to_device(prediction, device)
+        batch_size = sample["yolo_target"].shape[0]
+        num_classes = sample["yolo_target"].shape[1]
+        # print(prediction.keys())
+        # print(sample.keys())
+
+        # print(sample["ontology_target"].shape)
+        # print(sample["yolo_target"].shape)
+        # print(np.abs(sample["ontology_target"][0] - sample["yolo_target"][0]))
+        # print(sample["ontology_trace_mask"])
+        if prediction_file:
+            if i == 0:
+                h5_dataset = prediction_file.create_dataset(
+                    "target", (batch_size, num_classes), maxshape=(None, num_classes)
+                )
+                h5_datasets["target"] = h5_dataset
+                h5_dataset = prediction_file.create_dataset(
+                    "id", (batch_size,), maxshape=(None,), dtype=h5py.special_dtype(vlen=str)
+                )
+                h5_datasets["id"] = h5_dataset
+
+            h5_datasets["target"].resize((index + batch_size, num_classes))
+            h5_datasets["target"][index : index + batch_size] = sample["yolo_target"]
+            h5_datasets["id"].resize((index + batch_size,))
+            h5_datasets["id"][index : index + batch_size] = sample["id"]
+
+        for h, v in prediction["flat_prediction"].items():
+            print(h)
+            if prediction_file:
+                if i == 0:
+                    h5_dataset = prediction_file.create_dataset(
+                        h, (batch_size, num_classes), maxshape=(None, num_classes)
+                    )
+                    h5_datasets[h] = h5_dataset
+                # print(h)
+                # print(v.shape)
+                # print(v)
+
+                h5_datasets[h].resize((index + batch_size, num_classes))
+                h5_datasets[h][index : index + batch_size] = v.cpu().detach().numpy()
+
+        index += batch_size
+        # exit()
 
     return 0
 

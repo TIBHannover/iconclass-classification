@@ -9,6 +9,8 @@ from typing import Dict, List
 
 from decoders.decoders import DecodersManager
 
+from models import utils
+
 
 @DecodersManager.export("transformer_level_wise")
 class TransformerLevelWiseDecoder(nn.Module):
@@ -48,11 +50,27 @@ class TransformerLevelWiseDecoder(nn.Module):
 
         # Todo add drop out layers
 
-    def forward(
-        self,
-        context_vec,
-        src,
-    ):  # image_embedding, mask, query, pos_embedding):
+    def build_src(self, inputs):
+        assert "ontology_indexes" in inputs, ""
+
+        src = inputs["ontology_indexes"]
+        # add pad and start
+        src_level_with_tokens = utils.add_sequence_tokens_to_index(src, add_start=True)[:, :, :-1]
+
+        # flat traces to batch
+        src_level_with_tokens = src_level_with_tokens.reshape(-1, src_level_with_tokens.shape[-1])
+
+        return {"src": src_level_with_tokens}
+
+    def forward(self, inputs):  # image_embedding, mask, query, pos_embedding):
+        assert "image_embedding" in inputs, ""
+        num_traces = 1
+        if "ontology_indexes" in inputs:
+            src = self.build_src(inputs)["src"]
+            # src is padded input [BS*NUM_TRACES,NUM_LEVEL+1]
+            # if "ontology_indexes" in inputs:
+            num_traces = inputs["ontology_indexes"].shape[1]
+        image_embedding = torch.repeat_interleave(inputs["image_embedding"], num_traces, dim=0)
 
         # print(level)
         # print(x.shape)
@@ -62,66 +80,34 @@ class TransformerLevelWiseDecoder(nn.Module):
             query_embedding.append(self.embeddings[level](src[:, level]))
         query_embedding = torch.stack(query_embedding)
 
-        # print("SHAPE 1")
-        # print(image_embedding.shape)
-        # print(query_embedding.shape)
-        # print(pos_embedding.shape)
-        # print(mask.shape)
-        image_embedding = context_vec.permute(1, 0, 2)
-        # mask = mask.flatten(1)
-
-        # print("SHAPE 2")
-        # print(image_embedding.shape)
-        # print(pos_embedding.shape)
-        # print(mask.shape)
+        image_embedding = image_embedding.permute(1, 0, 2)
 
         tgt_mask = self.transformer.generate_square_subsequent_mask(query_embedding.shape[0]).to(image_embedding.device)
-        # , pos_embedding
-        # image_embedding = image_embedding + pos_embedding  # TODO detr only apply this on q and k
-        # image_mask has to be inverted (zero -> content)
 
+        # image_embedding [H*W/16, BS, FEATURE_SIZE]
+        # query_embedding [NUM_LEVEL+1, BS, FEATURE_SIZE]
         decoder_output = self.transformer(
             src=image_embedding,
             # src_key_padding_mask=~mask,
             tgt=query_embedding,
             tgt_mask=tgt_mask,
         )
+
         # print(decoder_output.shape)
         decoder_output = decoder_output.permute(1, 0, 2)
-
         # print(decoder_output.shape)
         classfier_results = []
         for level in range(src.shape[1]):
-            x = self.classifiers[level](decoder_output[:, level, :])
+            x = self.classifiers[level](decoder_output[:, level, :]) * (src[:, level] != 0).unsqueeze(1)
             # print(x.shape)
             classfier_results.append(x)
-        return classfier_results
 
-    def reset_state(self, batch_size):
-        return torch.zeros((batch_size, self.attention_dim))
+        decoder_without_tokens = utils.del_sequence_tokens_from_level_ontology(classfier_results)
 
-    def test_final(self, context_vec, ontology, threshold=0.5, max_traces=10):
-        batch_size = context_vec.shape[0]
-        # expand to beam size
-        context_vec = torch.repeat_interleave(context_vec, k, dim=0)
-        hidden = self.model.init_hidden_state(context_vec)
+        # flat output (similar to yolo)
+        flat_prediction = utils.map_to_flat_ontology(decoder_without_tokens, inputs["ontology_levels"])
 
-        x = torch.ones([context_vec.shape[0], 1], dtype=torch.int64).to(context_vec.device.index)
-        # x = torch.repeat_interleave(x, k, dim=0)
-        bsearch = BeamSearchScorer(batch_size, k, len(ontology), context_vec.device.index, x, self.mapper)
-
-        # exit()
-        outputs = []
-
-        for i_lev in range(len(ontology)):
-
-            pred, hidden, _ = self.model(x[:, i_lev], context_vec, hidden, i_lev)
-
-            x, beam_id, pred = bsearch.process(x, pred, i_lev)
-            outputs.append(pred)
-            print(x)
-
-        return outputs
+        return {"classifier": classfier_results, "prediction": flat_prediction}
 
     @classmethod
     def add_args(cls, parent_parser):
@@ -129,8 +115,8 @@ class TransformerLevelWiseDecoder(nn.Module):
         parser = argparse.ArgumentParser(parents=[parent_parser], add_help=False, conflict_handler="resolve")
         parser.add_argument("--transformer_d_model", type=int, default=512)
         parser.add_argument("--transformer_nhead", type=int, default=8)
-        parser.add_argument("--transformer_num_encoder_layers", type=int, default=6)
-        parser.add_argument("--transformer_num_decoder_layers", type=int, default=6)
+        parser.add_argument("--transformer_num_encoder_layers", type=int, default=0)
+        parser.add_argument("--transformer_num_decoder_layers", type=int, default=3)
         parser.add_argument("--transformer_dim_feedforward", type=int, default=2048)
         parser.add_argument("--transformer_dropout", type=float, default=0.1)
         return parser

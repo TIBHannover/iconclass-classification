@@ -1,4 +1,5 @@
 import os
+from subprocess import call
 import sys
 import re
 import argparse
@@ -104,7 +105,6 @@ def main():
 
     callbacks = [
         ProgressPrinter(refresh_rate=args.progress_refresh_rate),
-        # pl.callbacks.LearningRateMonitor(),
     ]
 
     # if args.output_path is not None and not args.use_wandb:
@@ -123,6 +123,7 @@ def main():
             name = args.wandb_name
         logger = WandbLogger(project=args.wandb_project, log_model=False, name=name)
         logger.watch(model)
+        callbacks.extend([pl.callbacks.LearningRateMonitor()])
         # callbacks.extend([WandbLogImageCallback()])
     else:
         logging.warning("No logger available")
@@ -148,7 +149,7 @@ def main():
         args,
         # callbacks=[ProgressPrinter(refresh_rate=args.progress_refresh_rate)]
         callbacks=callbacks,
-        # logger=logger,
+        logger=logger,
         enable_checkpointing=checkpoint_callback,
         # enable_progress_bar=False,
     )

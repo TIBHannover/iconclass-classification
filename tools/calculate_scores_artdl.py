@@ -1,9 +1,18 @@
+import os
+import sys
+import re
+import argparse
+
+import numpy as np
+import h5py
+from tqdm import tqdm
+from sklearn.metrics import average_precision_score
+
 import logging
-from msgpack import Unpacker
 import torch
 import json
 import msgpack
-import torch.distributed as dist
+import multiprocessing as mp
 
 
 def split_dict(data_dict, splits):
@@ -152,3 +161,88 @@ def read_jsonl_lb_mapping(path):
             data.update(d)
 
     return data
+
+
+def gen_filter_mask(mappings, threshold, key="count.yolo"):
+    mask = np.zeros(len(mappings), dtype=np.float32)
+    for m in mappings:
+        # print(m)
+        count = int(get_element(m, key))
+        if count > threshold:
+            mask[m["index"]] = 1
+
+    return mask
+
+
+def build_level_map(mapping):
+    level_map = np.zeros(len(mapping), dtype=np.int64)
+    for m in mapping:
+        level_map[m["index"]] = len(m["parents"])
+
+    return level_map
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="")
+
+    parser.add_argument("-v", "--verbose", action="store_true", help="verbose output")
+    parser.add_argument("-p", "--prediction_path", required=True, help="path to the prediction h5 file")
+    parser.add_argument("-o", "--output_path", required=True, help="path to the prediction h5 file")
+    parser.add_argument("-f", "--filter", nargs="+", type=int, default=[0], help="path to the prediction h5 file")
+    parser.add_argument("--mapping_path", type=str)
+    args = parser.parse_args()
+    return args
+
+
+whitelist = [
+    "11H(DOMINIC)",
+    "11H(FRANCIS)",
+    "11H(JEROME)",
+    "11H(JOHN THE BAPTIST)",
+    "11F",
+    "11H(ANTONY OF PADUA)",
+    "11H(MARY MAGDALENE)",
+    "11H(PAUL)",
+    "11H(PETER)",
+    "11H(SEBASTIAN)",
+]
+
+
+def main():
+    args = parse_args()
+
+    mapping_config = []
+    if args.mapping_path is not None:
+        mapping_config = read_line_data(args.mapping_path)
+
+    level_map = build_level_map(mapping_config)
+    max_level = np.max(level_map)
+    # exit()
+
+    prediction_file = h5py.File(args.prediction_path, "r")
+    # print(prediction_file.keys())
+    with open(args.output_path, "w") as file:
+        possible_predictions = ["ontology", "clip", "yolo"]
+        for possible_prediction in possible_predictions:
+            if possible_prediction not in prediction_file:
+                continue
+            # print(possible_prediction)
+            prediction = prediction_file[possible_prediction]
+            target = prediction_file["target"]
+
+            target_sum = np.sum(target, axis=0)
+            # print(target_sum.shape)
+
+            ap = average_precision_score(target, prediction, average=None)
+
+            ap_mask = target_sum > 0
+            for x in range(prediction.shape[1]):
+                if mapping_config[x]["id"] in whitelist:
+
+                    print(prediction[:50, x])
+                    print(mapping_config[x]["id"], ap[x], target_sum[x])
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

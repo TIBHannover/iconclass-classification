@@ -404,6 +404,9 @@ class EncoderHierarchicalDecoder(BaseModel):
         parser = argparse.ArgumentParser(parents=[parent_parser], add_help=False, conflict_handler="resolve")
         # args, _ = parser.parse_known_args()
         # if "classifier_path" not in args:
+        parser.add_argument(
+            "--targets",
+        )
         parser.add_argument("--mapping_path", type=str)
         parser.add_argument("--classifier_path", type=str)
         parser.add_argument("--ontology_path", type=str)
@@ -423,4 +426,5 @@ class EncoderHierarchicalDecoder(BaseModel):
         parser.add_argument("--output_method", choices=["global", "level", "minimal"], default="level")
 
         parser.add_argument("--best_threshold", nargs="+", type=float, default=[0.2])
+        parser.add_argument("--targets", choices=("flat", "yolo", "clip", "onto"), nargs="+")
         return parser

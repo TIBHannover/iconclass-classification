@@ -117,4 +117,8 @@ class ImageDataloader:
 
     def __iter__(self):
         for path in self.paths:
-            yield {**path, "rel_path": os.path.relpath(path["path"], os.path.commonpath([self.path, path["path"]]))}
+            yield {
+                **path,
+                "rel_path": os.path.relpath(path["path"], os.path.commonpath([self.path, path["path"]])),
+                "name": os.path.splitext(os.path.basename(path["path"]))[0],
+            }

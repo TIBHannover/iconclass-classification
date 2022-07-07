@@ -65,8 +65,12 @@ def pad_collate(batch, pad_values=None):
 
         result_dict = {}
         for key in elem:
-            padded_sub_dict = pad_collate([d[key] for d in batch], pad_values[key] if key in pad_values else None)
-            result_dict.update({key: padded_sub_dict})
+            try:
+                padded_sub_dict = pad_collate([d[key] for d in batch], pad_values[key] if key in pad_values else None)
+                result_dict.update({key: padded_sub_dict})
+            except Exception as e:
+                # print(key, batch)
+                raise e
         return result_dict
     elif isinstance(elem, tuple) and hasattr(elem, "_fields"):  # namedtuple
         return elem_type(*(pad_collate(samples) for samples in zip(*batch)))

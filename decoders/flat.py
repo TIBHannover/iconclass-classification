@@ -20,6 +20,10 @@ class FlatDecoder(nn.Module):
         else:
             dict_args = kwargs
 
+        # TODO
+        print(in_features, out_features)
+        in_features = 512
+        print(in_features, out_features)
         self.decoder_dropout = dict_args.get("decoder_dropout", 0.5)
         self.decoder_hidden_dim = dict_args.get("decoder_hidden_dim", 512)
 
@@ -32,11 +36,13 @@ class FlatDecoder(nn.Module):
             self.dropout2 = torch.nn.Dropout(self.decoder_dropout)
             self.classifier = torch.nn.Linear(self.decoder_hidden_dim, self.out_features)
         else:
-            self.classifier = torch.nn.Linear(self.decoder_hidden_dim, self.out_features)
+            self.classifier = torch.nn.Linear(self.in_features, self.out_features)
 
-    def forward(self, x):
-        feature = torch.mean(x, dim=1)
-        x = self.dropout1(feature)
+    def forward(self, inputs):
+
+        assert "image_features" in inputs, ""
+        x = inputs.get("image_features")
+
         if self.decoder_hidden_dim is not None and self.decoder_hidden_dim > 0:
             x = self.fc(x)
             x = self.dropout2(x)
@@ -44,7 +50,7 @@ class FlatDecoder(nn.Module):
         else:
             x = self.classifier(x)
 
-        return x
+        return {"prediction": x}
 
     @classmethod
     def add_args(cls, parent_parser):

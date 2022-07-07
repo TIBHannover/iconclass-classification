@@ -65,6 +65,21 @@ def map_to_level_ontology(ontology_target, ontology_levels, max_level=8):
     return targets
 
 
+def map_classifier_to_flat_ontology(ontology_target, ontology_levels, level=0):
+    mapping = torch.arange(ontology_levels.shape[-1])
+
+    target = torch.zeros(
+        *ontology_target.shape[:-1],
+        ontology_levels.shape[-1],
+        dtype=ontology_target.dtype,
+        device=ontology_target.device,
+    )
+    m = mapping[ontology_levels[0, ...] == level]
+    target[..., m] = ontology_target
+
+    return target
+
+
 def map_to_flat_ontology(ontology_target, ontology_levels, max_level=8):
     mapping = torch.arange(ontology_levels.shape[-1])
     target = None

@@ -1,3 +1,4 @@
+from sklearn.utils import shuffle
 import torch
 import logging
 import random
@@ -61,6 +62,43 @@ class IconclassTextGenerator(IterDataPipe):
             yield {**sample, self.output_field: classes_text}
 
 
+@functional_datapipe("iconclass_externel_text")
+class IconclassExternalTextGenerator(IterDataPipe):
+    def __init__(
+        self,
+        dp,
+        labels: Dict = None,
+        shuffle: bool = False,
+        input_field: str = None,
+        output_field: str = None,
+    ):
+        self.dp = dp
+        self.labels = labels
+        self.input_field = input_field if input_field else "id"
+        self.output_field = output_field if output_field else "txt"
+        self.shuffle = shuffle
+
+    def __iter__(self):
+
+        for sample in self.dp:
+            sample_key = sample.get(self.input_field, None)
+
+            class_texts = self.labels.get(sample_key)
+
+            if class_texts is None:
+                class_texts = [""]
+                # print(sample_key, flush=True)
+                # print(sample, flush=True)
+                # exit()
+            if shuffle:
+                txt = random.choice(class_texts)
+            else:
+                txt = class_texts[0]
+            # print(txt)
+
+            yield {**sample, self.output_field: txt}
+
+
 @functional_datapipe("tokenize_openclip")
 class TokenizeOpenClip(IterDataPipe):
     def __init__(self, dp, input_field: str = None, output_field: str = None) -> None:
@@ -73,9 +111,7 @@ class TokenizeOpenClip(IterDataPipe):
 
         for sample in self.dp:
             embedding = torch.squeeze(open_clip.tokenize([sample.get(self.input_field)]))
-            yield {
-                **sample,
-            }
+            yield {**sample, self.output_field: embedding}
 
 
 @functional_datapipe("load_from_msg")
@@ -199,6 +235,25 @@ class OntologyTargetBuilder(IterDataPipe):
     def __iter__(self) -> Iterator[Dict]:
 
         for sample in self.dp:
+            if len(sample["classes"]) == 0:
+                # continue
+                # ontology_mask torch.Size([64, 4, 21484])
+                # ontology_target torch.Size([64, 4, 21484])
+                # ontology_indexes torch.Size([64, 4, 8])
+                # ontology_ranges torch.Size([64, 4, 8, 2])
+                # ontology_trace_mask torch.Size([64, 4])
+                # ontology_levels torch.Size([64, 21484])
+
+                yield {
+                    **sample,
+                    "ontology_mask": torch.zeros([0, len(self.mapping)], dtype=torch.int32),
+                    "ontology_target": torch.zeros([0, len(self.mapping)]),
+                    "ontology_indexes": torch.zeros([0, 8], dtype=torch.int32),
+                    "ontology_ranges": torch.zeros([0, 8, 2], dtype=torch.int32),
+                    "ontology_trace_mask": torch.zeros([0], dtype=torch.int32),
+                    "ontology_levels": self.level_map,
+                }
+                continue
             ontology_target = []
             ontology_mask = []
             ontology_trace_mask = []
@@ -305,6 +360,7 @@ class SrongImageAugmenter(IterDataPipe):
                 torchvision.transforms.ToPILImage(),
                 SquarePad(),
                 torchvision.transforms.Resize(512),
+                torchvision.transforms.RandomHorizontalFlip(),
                 torchvision.transforms.RandAugment(),
                 torchvision.transforms.RandomResizedCrop(output_size, scale=[0.7, 1.0]),
                 torchvision.transforms.ToTensor(),
@@ -398,5 +454,6 @@ class SampleCleaner(IterDataPipe):
 
         for sample in self.dp:
             for key in self.keys:
-                del sample[key]
+                if key in sample:
+                    del sample[key]
             yield {**sample}

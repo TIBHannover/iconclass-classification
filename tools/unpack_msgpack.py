@@ -36,10 +36,11 @@ def main():
         with open(path, "rb") as f:
             packer = msgpack.Unpacker(f, max_buffer_size=1024 * 1024 * 1024, raw=True)
             for p in packer:
+                
                 imageio.imwrite(
                     os.path.join(
                         args.output_path,
-                        p[b"path"].decode("utf-8"),
+                        p[b"id"].decode("utf-8")+".jpg",
                     ),
                     imageio.imread(p[b"image"]),
                     quality=95,

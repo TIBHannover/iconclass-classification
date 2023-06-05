@@ -117,12 +117,13 @@ class OpenClip(CLIP):
 
         assert image is not None or text is not None, "At least one of image or text should be defined"
         image_features = None
+        image_embedding = None
         if image is not None:
 
             image_features, image_embedding = self.encode_image(image)
             image_features = F.normalize(image_features, dim=-1)
-        text_features = None
 
+        text_features = None
         if text is not None:
             text_features = self.encode_text(text)
             text_features = F.normalize(text_features, dim=-1)

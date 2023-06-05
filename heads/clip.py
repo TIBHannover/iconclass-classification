@@ -266,7 +266,7 @@ class CLIPHead(nn.Module):
             for label in tqdm(labels):
                 texts = [template(label) for template in openai_imagenet_template[:1]]
                 clip_embedding = open_clip.tokenize(texts).to(model.device)
-                class_embeddings = model({"text": clip_embedding})
+                class_embeddings = model({"text": clip_embedding})["text_features"]
                 # logging.info(texts)
                 class_embedding = F.normalize(class_embeddings, dim=-1).mean(dim=0)
                 class_embedding /= class_embedding.norm()

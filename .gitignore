@@ -144,3 +144,4 @@ wandb/
 *.out
 lightning_logs/
 logs/
+slurm_outputs/

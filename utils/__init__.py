@@ -1,5 +1,6 @@
 from .strategy import *
 from .log import *
+from .notation import *
 
 import torch
 

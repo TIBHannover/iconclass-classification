@@ -6,11 +6,14 @@ Copy from openai repo
 
 import torch
 from typing import Any, Union, List
-from tools.simple_tokenizer import SimpleTokenizer as _Tokenizer
+from .simple_tokenizer import SimpleTokenizer as _Tokenizer
 
-#_tokenizer = _Tokenizer()
+# _tokenizer = _Tokenizer()
 
-def tokenize(tokenizer, texts: Union[str, List[str]], context_length: int = 77, truncate: bool = False) -> torch.LongTensor:
+
+def tokenize(
+    tokenizer, texts: Union[str, List[str]], context_length: int = 77, truncate: bool = False
+) -> torch.LongTensor:
     """
     Returns the tokenized representation of given input string(s)
     Parameters
@@ -27,7 +30,7 @@ def tokenize(tokenizer, texts: Union[str, List[str]], context_length: int = 77, 
     """
     if isinstance(texts, str):
         texts = [texts]
-        
+
     # move from global variable to argument
     _tokenizer = tokenizer
 
@@ -43,9 +46,10 @@ def tokenize(tokenizer, texts: Union[str, List[str]], context_length: int = 77, 
                 tokens[-1] = eot_token
             else:
                 raise RuntimeError(f"Input {texts[i]} is too long for context length {context_length}")
-        result[i, :len(tokens)] = torch.tensor(tokens)
+        result[i, : len(tokens)] = torch.tensor(tokens)
 
     return result
+
 
 # aa=" invidia present accusing irreverence biasimo honouring detrattione abstract betraying deceit maledicenza mocking conduct truth vitioso calumny ears accused remorse apelles treachery personification calunnia repenting confronted ass della derisione morality ignorance suspicion ignorantia innocent bad idea throne judge envy allegory dispreggio slander ripa virtù judgement"
 # aa = aa.replace(", ", " ")

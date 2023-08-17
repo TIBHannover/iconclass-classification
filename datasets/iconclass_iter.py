@@ -2,7 +2,7 @@ import argparse
 import logging
 import random
 import imageio
-from datasets.pad_collate import PadCollate
+from .pad_collate import PadCollate
 import torchvision
 
 import numpy as np
@@ -11,19 +11,19 @@ import torch
 from torchdata.datapipes.iter import FileLister, FileOpener, IterDataPipe
 from torchdata.datapipes import functional_datapipe
 
-from datasets.datasets import DatasetsManager
-from datasets.pipeline import (
+from .datasets import DatasetsManager
+from .pipeline import (
     Pipeline,
     MapDataset,
 )
-from datasets.utils import read_dict_data, read_line_data
-from datasets.iconclass import IconclassDataloader
+from .utils import read_dict_data, read_line_data
+from .iconclass import IconclassDataloader
 
 from typing import Dict, Iterator, Union, Tuple, Any
 
-from datasets.image_pipeline import RandomResize
+from .image_pipeline import RandomResize
 
-from utils import get_node_rank
+from hierarchical.utils import get_node_rank
 
 
 def build_level_map(mapping):

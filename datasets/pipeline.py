@@ -21,7 +21,7 @@ import msgpack
 
 from PIL import Image
 
-from datasets.utils import get_element
+from .utils import get_element
 
 Image.warnings.simplefilter("error", Image.DecompressionBombError)  # turn off Decompression bomb error
 Image.warnings.simplefilter("error", Image.DecompressionBombWarning)  # turn off Decompression bomb warning
@@ -107,7 +107,6 @@ class ImageDataset(Dataset):
         self.new_paths = []
         for path in self.path:
             if os.path.isdir(path):
-
                 self.new_paths.extend(list_files(path, image_re))
 
             if os.path.isfile(path):
@@ -369,7 +368,6 @@ class SamplerDataset(Dataset):
                 # print(local_sample_dist[143])
 
             if random.random() < min(discard_prob[concept], self.max_discard):
-
                 continue
 
             yield x
@@ -482,7 +480,6 @@ class ConcatPipeline(Pipeline):
         self.pipelines = pipelines
 
     def call(self, datasets=None, **kwargs):
-
         pls = [pl(datasets) for pl in self.pipelines]
 
         class Concat(Dataset):
@@ -505,7 +502,6 @@ class ConcatShufflePipeline(Pipeline):
         self.drop_last = drop_last
 
     def call(self, datasets=None, **kwargs):
-
         pls = [pl(datasets) for pl in self.pipelines]
         drop_last = self.drop_last
 

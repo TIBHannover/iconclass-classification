@@ -8,10 +8,10 @@ import torch
 import torchvision
 import imageio
 
-from datasets.image_pipeline import IconclassImagePreprocessingPipeline
+from .image_pipeline import IconclassImagePreprocessingPipeline
 
-from datasets.datasets import DatasetsManager
-from datasets.pipeline import (
+from .datasets import DatasetsManager
+from .pipeline import (
     Pipeline,
     MapDataset,
     MsgPackPipeline,
@@ -23,10 +23,10 @@ from datasets.pipeline import (
     ImagePipeline,
     ConcatPipeline,
 )
-from datasets.utils import read_line_data
+from .utils import read_line_data
 
 
-from datasets.iconclass import IconclassDataloader
+from .iconclass import IconclassDataloader
 
 
 class IconclassYoloFlattenDecoderPipeline(Pipeline):
@@ -36,7 +36,6 @@ class IconclassYoloFlattenDecoderPipeline(Pipeline):
 
     def call(self, datasets=None, **kwargs):
         def decode(sample):
-
             y_onehot_0 = torch.zeros(len(self.mapping))
             for x in sample["all_ids"]:
                 y_onehot_0.scatter_(0, torch.tensor(x), 1)

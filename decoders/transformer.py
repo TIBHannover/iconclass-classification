@@ -38,15 +38,24 @@ class TransformerLevelWiseDecoder(nn.Module):
             dropout=self.dropout,
         )
 
+        total_params = sum(p.numel() for p in self.transformer.parameters())
+        print(f"Number of parameters transformer: {total_params}")
+
         self.hidden_dim = self.transformer.d_model
 
         self.embeddings = nn.ModuleList(
             [nn.Embedding(embedding_size, self.hidden_dim) for x in range(len(vocabulary_sizes))]
         )
 
+        total_params = sum(p.numel() for p in self.embeddings.parameters())
+        print(f"Number of parameters embeddings: {total_params}")
+
         self.classifiers = nn.ModuleList(
             [nn.Linear(self.hidden_dim, vocabulary_sizes[i]) for i in range(len(vocabulary_sizes))]
         )
+
+        total_params = sum(p.numel() for p in self.classifiers.parameters())
+        print(f"Number of parameters classifiers: {total_params}")
 
         # Todo add drop out layers
 
@@ -77,6 +86,7 @@ class TransformerLevelWiseDecoder(nn.Module):
         # for x in
         query_embedding = []
         for level in range(src.shape[1]):
+            # print(level, src[:, level])
             query_embedding.append(self.embeddings[level](src[:, level]))
         query_embedding = torch.stack(query_embedding)
 

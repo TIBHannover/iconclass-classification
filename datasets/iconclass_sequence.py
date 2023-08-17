@@ -8,9 +8,9 @@ import torch
 import torchvision
 import imageio
 
-from datasets.image_pipeline import IconclassImagePreprocessingPipeline
-from datasets.datasets import DatasetsManager
-from datasets.pipeline import (
+from .image_pipeline import IconclassImagePreprocessingPipeline
+from .datasets import DatasetsManager
+from .pipeline import (
     MapPipeline,
     Pipeline,
     MapDataset,
@@ -19,12 +19,12 @@ from datasets.pipeline import (
     ConcatShufflePipeline,
     ConcatPipeline,
 )
-from datasets.utils import read_line_data
+from .utils import read_line_data
 
-from datasets.pad_collate import PadCollate
+from .pad_collate import PadCollate
 
 
-from datasets.iconclass import IconclassDataloader
+from .iconclass import IconclassDataloader
 
 
 class IconclassSequenceDecoderPipeline(Pipeline):
@@ -70,7 +70,6 @@ class IconclassSequenceDecoderPipeline(Pipeline):
                     ignore_labels = [False for x in token_sequence]
 
                 for l, classifier in enumerate(self.classifier):
-
                     one_hot = np.zeros([len(classifier["tokenizer"])])
                     if l < len(token_id_sequence) and not ignore_labels[l]:
                         one_hot[token_id_sequence[l]] = 1
@@ -86,7 +85,6 @@ class IconclassSequenceDecoderPipeline(Pipeline):
                 parents_sequence = []
                 for l, classifier in enumerate(self.classifier):
                     if l < len(self.mapping[c]["parents"]) and not ignore_labels[l]:
-
                         parents_sequence.append(self.mapping[c]["parents"][l])
                     else:
                         parents_sequence.append("#PAD")

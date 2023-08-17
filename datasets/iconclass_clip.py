@@ -8,9 +8,9 @@ import torch
 import torchvision
 import imageio
 
-# from datasets.image_pipeline import ImagePreprocessingPipeline
-from datasets.datasets import DatasetsManager
-from datasets.pipeline import (
+# from .image_pipeline import ImagePreprocessingPipeline
+from .datasets import DatasetsManager
+from .pipeline import (
     Pipeline,
     MapDataset,
     MsgPackPipeline,
@@ -22,10 +22,10 @@ from datasets.pipeline import (
     ImagePipeline,
     ConcatPipeline,
 )
-from datasets.utils import read_line_data
+from .utils import read_line_data
 
-from datasets.iconclass import IconclassDataloader
-from tools import tokenizer_clip
+from .iconclass import IconclassDataloader
+from hierarchical.tools import tokenizer_clip
 
 
 class IconclassCLIPDecoderPipeline(Pipeline):
@@ -38,7 +38,6 @@ class IconclassCLIPDecoderPipeline(Pipeline):
 
     def call(self, datasets=None, **kwargs):
         def decode(sample):
-
             trace_index = random.randint(0, len(sample["classes"]) - 1)
             rand_trace_label = sample["classes"][trace_index]
             txt_label = self.labels.get(rand_trace_label)["txt"]

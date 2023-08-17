@@ -9,23 +9,23 @@ import torchvision
 
 from PIL import Image
 
-from datasets.datasets import DatasetsManager
-from datasets.pipeline import (
+from .datasets import DatasetsManager
+from .pipeline import (
     Pipeline,
     MapDataset,
 )
 
-from datasets.utils import read_line_data
+from .utils import read_line_data
 
 # from models.utils import build_level_map
-from datasets.image_pipeline import (
+from .image_pipeline import (
     CocoImageTrainPreprocessingPipeline,
     ImageDecodePipeline,
     RandomResize,
     CocoImageTestPreprocessingPipeline,
 )
-from datasets.datasets import DatasetsManager
-from datasets.pipeline import (
+from .datasets import DatasetsManager
+from .pipeline import (
     Pipeline,
     MapDataset,
     MsgPackPipeline,
@@ -37,7 +37,7 @@ from datasets.pipeline import (
     split_chunk_by_nodes,
     split_chunk_by_workers,
 )
-from datasets.pad_collate import PadCollate
+from .pad_collate import PadCollate
 
 
 def build_level_map(mapping):
@@ -84,7 +84,6 @@ class CocoAllDecoderPipeline(Pipeline):
         for c in self.classifier:
             self.classifier_map[c["id"]] = c
             for x in range(c["range"][0], c["range"][1]):
-
                 self.cls_ids_map[x] = c["index"]
 
         self.yolo_map = {}

@@ -4,12 +4,9 @@
 import re
 
 from copy import deepcopy
-from utils import get_bracketed
+from hierarchical.utils.utils import get_bracketed
 
-SCHEME = re.compile(
-    r'^(\d{1,2})([A-IK-Z]{1,2})?(\d+)?'
-    r'(\([^+)]+\))?(\d+)?(\(\+[0-9]+\))?$'
-)
+SCHEME = re.compile(r"^(\d{1,2})([A-IK-Z]{1,2})?(\d+)?" r"(\([^+)]+\))?(\d+)?(\(\+[0-9]+\))?$")
 
 
 def is_valid(x):
@@ -37,13 +34,14 @@ def valid_notations(function):
 
 class Notation:
     def __init__(self, code):
-        self.code = code.replace('+ ', '+').strip(':,; ')
+        code = code.upper()
+        self.code = code.replace("+ ", "+").strip(":,; ")
         text = get_bracketed(self.code, get_key=False)
 
         if text:
-            text_without = text[0].replace(' (', ', ')
-            text_without = text_without.replace('(', ', ')
-            text_without = text_without.replace(')', '')
+            text_without = text[0].replace(" (", ", ")
+            text_without = text_without.replace("(", ", ")
+            text_without = text_without.replace(")", "")
 
             self.code = self.code.replace(text[0], text_without)
 
@@ -78,9 +76,7 @@ class Notation:
         return self.depth
 
     def __repr__(self):
-        return '<{} object with code {}>'.format(
-            self.__class__.__name__, self.code
-        )
+        return "<{} object with code {}>".format(self.__class__.__name__, self.code)
 
     def is_valid(self):
         if self._match:
@@ -94,7 +90,7 @@ class Notation:
             return Notation(self.code + other)
 
     @valid_notation
-    def replace(self, old_value, new_value=''):
+    def replace(self, old_value, new_value=""):
         if isinstance(old_value, Notation):
             old_value = old_value.code
 
@@ -162,12 +158,11 @@ class Notation:
 
     @valid_notation
     def get_text(self):
-        return self._match[3].strip('()')
+        return self._match[3].strip("()")
 
     @valid_notation
     def has_name(self):
-        if self.has_text() and \
-                self.get_text() != '...':
+        if self.has_text() and self.get_text() != "...":
             return True
 
         return False
@@ -194,12 +189,12 @@ class Notation:
     def get_key(self):
         key = self._match[5]
 
-        return key.strip('()').strip('+')
+        return key.strip("()").strip("+")
 
     @valid_notation
     def strip_key(self):
         key = self._match[5]
-        code = self.code.replace(key, '')
+        code = self.code.replace(key, "")
 
         return Notation(code)
 
@@ -239,7 +234,7 @@ class Notation:
             depth += len(self.get_queue())
 
         if self.has_text():
-            if self.get_text() != '...':
+            if self.get_text() != "...":
                 depth += 1
 
             depth += 1
@@ -260,7 +255,7 @@ class Notation:
         elif index == 4:
             value = _function(self.get_digit())
         elif index == 3:
-            value = '(...)' if self.has_name() else ''
+            value = "(...)" if self.has_name() else ""
         elif index == 2:
             value = _function(self.get_queue())
         elif index == 1:
@@ -281,10 +276,10 @@ class Notation:
             code = deepcopy(self._match)
             code[i] = value
 
-            if code[5] and '+' not in code[5]:
-                code[5] = '(+{})'.format(code[5])
+            if code[5] and "+" not in code[5]:
+                code[5] = "(+{})".format(code[5])
 
-            code = ''.join(str(x) for x in code if x)
+            code = "".join(str(x) for x in code if x)
 
             return Notation(code)
 
@@ -299,16 +294,32 @@ class Notation:
             values = list()
 
             for x in value:
-                if x != 'I':
+                if x != "I":
                     x = ord(x) + 1
                 else:
                     x = ord(x) + 2
 
                 values.append(chr(x))
 
-            return ''.join(values)
+            return "".join(values)
 
     @staticmethod
     def _strip_last(value):
         if value.isdigit():
             return value[:-1]
+
+
+def generate_iconclass(iconclass_annotation):
+    results = []
+    notation = Notation(iconclass_annotation)
+    if not notation.is_valid():
+        # check if there is a sep
+        if ":" in iconclass_annotation:
+            for sub_iconclass_annotation in iconclass_annotation.split(":"):
+                results.extend(generate_iconclass(sub_iconclass_annotation))
+
+        return results
+
+    results.append(notation.strip_key().code)
+
+    return results

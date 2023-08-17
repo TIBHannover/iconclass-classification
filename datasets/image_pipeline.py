@@ -7,9 +7,9 @@ import torch
 import torchvision.transforms as T
 import torchvision.transforms.functional as F
 
-from datasets.transforms import intersection_over_union, coverage_bbox
-from datasets.pipeline import Pipeline, MapDataset
-from datasets.transforms import CenterCropWithBBox, RandomCropWithBBox, RandomResize
+from .transforms import intersection_over_union, coverage_bbox
+from .pipeline import Pipeline, MapDataset
+from .transforms import CenterCropWithBBox, RandomCropWithBBox, RandomResize
 
 
 class IconclassImagePreprocessingPipeline(Pipeline):
@@ -27,7 +27,6 @@ class IconclassImagePreprocessingPipeline(Pipeline):
                 has_additional = False
 
             if self.sample_additional is not None and has_additional:
-
                 if isinstance(self.sample_additional, float):
                     prob = self.sample_additional
                 else:
@@ -43,9 +42,7 @@ class IconclassImagePreprocessingPipeline(Pipeline):
                 image = np.asarray(imageio.imread(sample["image_data"]))
 
             if self.min_size is not None and self.min_size > 0:
-
                 if image.shape[0] < self.min_size or image.shape[1] < self.min_size:
-
                     return None
 
             if "additional" in sample:
@@ -74,7 +71,6 @@ class ImageDecodePipeline(Pipeline):
 
     def call(self, datasets=None, **kwargs):
         def decode(sample):
-
             image = sample["image"]
             if self.transformation:
                 image = self.transformation(image)
@@ -112,9 +108,7 @@ class CocoImageTrainPreprocessingPipeline(Pipeline):
             image = np.asarray(imageio.imread(sample["image_data"]))
 
             if self.min_size is not None and self.min_size > 0:
-
                 if image.shape[0] < self.min_size or image.shape[1] < self.min_size:
-
                     return None
 
             del sample["image_data"]
@@ -172,9 +166,7 @@ class CocoImageTestPreprocessingPipeline(Pipeline):
             image = np.asarray(imageio.imread(sample["image_data"]))
 
             if self.min_size is not None and self.min_size > 0:
-
                 if image.shape[0] < self.min_size or image.shape[1] < self.min_size:
-
                     return None
 
             del sample["image_data"]

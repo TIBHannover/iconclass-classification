@@ -1,4 +1,3 @@
-from genericpath import exists
 import os
 import sys
 import re
@@ -9,6 +8,8 @@ import torch
 import msgpack
 import logging
 import uuid
+
+from hierarchical.utils.notation import Notation
 
 
 def split_dict(data_dict, splits):
@@ -143,10 +144,47 @@ def parse_args():
 
     parser.add_argument("-a", "--annotation_path", help="verbose output")
     parser.add_argument("-m", "--mapping_path", help="verbose output")
+    parser.add_argument("-i", "--iconclass_path", help="verbose output")
     parser.add_argument("-c", "--classifier_path", help="verbose output")
     parser.add_argument("-o", "--output_path", help="verbose output")
     args = parser.parse_args()
     return args
+
+
+def generate_iconclass(iconclass_annotation):
+    results = []
+    notation = Notation(iconclass_annotation)
+    if not notation.is_valid():
+        # check if there is a sep
+        if ":" in iconclass_annotation:
+            for sub_iconclass_annotation in iconclass_annotation.split(":"):
+                results.extend(generate_iconclass(sub_iconclass_annotation))
+
+        return results
+
+    results.append(notation.strip_key().code)
+
+    return results
+
+
+def read_iconclass_data(iconclass_path):
+    text_dict = {}
+    for root, dirs, files in os.walk(iconclass_path):
+        for f in files:
+            file_path = os.path.join(root, f)
+            if "refs" in file_path:
+                continue
+            with open(file_path, "r") as f:
+                for line in f:
+                    m = re.match(r"^(.*?)\|(.*?)$", line)
+                    if not m:
+                        print(line)
+                        continue
+                    if m.group(1) not in text_dict:
+                        text_dict[m.group(1)] = m.group(2)
+                    else:
+                        text_dict[m.group(1)] = f"{text_dict[m.group(1)]}, {m.group(2)}"
+    return text_dict
 
 
 def main():
@@ -155,7 +193,9 @@ def main():
 
     mapping = read_line_data(args.mapping_path, dict_key="id")
     classifier = read_line_data(args.classifier_path, dict_key="name")
-
+    iconclass_data = read_iconclass_data(args.iconclass_path)
+    # print(mapping)
+    # exit()
     class_map = {
         "11F(MARY)": "11F",
         "11HH(CATHERINE)": "11H(CATHERINE)",
@@ -170,18 +210,22 @@ def main():
             # print(img, annotations)
             filtered_annotations = []
             for anno in annotations:
-                if anno not in mapping:
-                    if ":" in anno:
-                        filtered_annotations.extend(anno.split(":"))
-                    # print(anno)
+                anno_split = generate_iconclass(anno)
+                filtered_annotations.extend(anno_split)
+                # if anno not in mapping:
+                #     if ":" in anno:
+                #         filtered_annotations.extend(anno.split(":"))
+                #     # print(anno)
 
-                    elif m := re.match(r"^(.*)\(\+\d+\)$", anno):
-                        # print(m)
-                        filtered_annotations.append(m.group(1))
-                    else:
-                        filtered_annotations.append(anno)
+                #     elif m := re.match(r"^(.*)\(\+\d+\)$", anno):
+                #         # print(m)
+                #         filtered_annotations.append(m.group(1))
+                #     else:
+                #         filtered_annotations.append(anno)
 
             for anno in filtered_annotations:
+                if anno not in iconclass_data:
+                    continue
                 if anno not in mapping:
                     print(anno)
                     wrong += 1

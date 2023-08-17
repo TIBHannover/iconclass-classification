@@ -1,9 +1,9 @@
-from datasets.datasets import DatasetsManager
-import datasets.iconclass_sequence
-import datasets.iconclass_flatten
-import datasets.iconclass_yolo_flatten
-import datasets.iconclass_clip
-import datasets.iconclass_all
-import datasets.coco_all
-import datasets.iconclass_iter
+from .datasets import DatasetsManager
+from . import iconclass_sequence
+from . import iconclass_flatten
+from . import iconclass_yolo_flatten
+from . import iconclass_clip
+from . import iconclass_all
+from . import coco_all
+from . import iconclass_iter
 from .datapipes import *

@@ -95,7 +95,6 @@ def read_dict_data(path: str, dict_key: str = None, keep_keys: str = None):
             return json.loads(f.read)
 
     if path.endswith(".msg"):
-
         with open(path, "rb") as f:
             return msgpack.unpackb(f.read())
 
@@ -120,7 +119,6 @@ def read_line_data(path: str, dict_key: str = None, keep_keys: str = None):
                 file_data.append(d)
 
     if path.endswith(".msg"):
-
         with open(path, "rb") as f:
             u = msgpack.Unpacker(f)
             for line in u:
@@ -160,9 +158,9 @@ def main():
 
     class_map = {
         "11F(MARY)": "11F",
-        "11HH(CATHERINE)": "11H(CATHERINE)",
-        "11HH(MARY MAGDALENE)": "11H(MARY MAGDALENE)",
-        "11HH(BARBARA)": "11H(BARBARA)",
+        # "11HH(CATHERINE)": "11H(CATHERINE)",
+        # "11HH(MARY MAGDALENE)": "11H(MARY MAGDALENE)",
+        # "11HH(BARBARA)": "11H(BARBARA)",
     }
 
     for root, dirs, files in os.walk(args.annotation_path):
@@ -187,7 +185,6 @@ def main():
                     if is_shown <= 0:
                         continue
                     if class_name in class_map:
-
                         annotation_dict[set_name][filename].append(class_map[class_name])
                     else:
                         annotation_dict[set_name][filename].append(class_name)

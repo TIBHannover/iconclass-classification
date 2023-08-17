@@ -7,11 +7,10 @@ import torch
 import torchvision.transforms as T
 import torchvision.transforms.functional as F
 
-from datasets.utils import get_element
+from .utils import get_element
 
 
 def coverage_bbox(outer_bbox, object_bbox):
-
     # determine the coordinates of the intersection rectangle
     x_left = max(outer_bbox[0], object_bbox[0])
     y_top = max(outer_bbox[1], object_bbox[1])
@@ -40,7 +39,6 @@ def coverage_bbox(outer_bbox, object_bbox):
 
 
 def intersection_over_union(bbox1, bbox2):
-
     # determine the coordinates of the intersection rectangle
     x_left = max(bbox1[0], bbox2[0])
     y_top = max(bbox1[1], bbox2[1])

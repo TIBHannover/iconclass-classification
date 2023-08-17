@@ -3,7 +3,7 @@
 
 runs=( \
     # /nfs/home/springsteinm/output/iart/iconclass/onto_fine_4x64_batch_4x64_packed_blib_instruction/230611 \
-    /nfs/home/springsteinm/output/iart/iconclass/onto_fine_4x64packed/230613 \
+    /nfs/home/springsteinm/output/iart/iconclass/onto_fine_4x64packed/230613 
 )
 
 
@@ -13,7 +13,7 @@ do
     
     mkdir -p ${model_path}/predictions/
     
-    apptainer exec --env TORCH_DISTRIBUTED_DEBUG=DETAIL,NCCL_DEBUG="INFO" ~/env/iart_pytorch_1_11_0_220603.sif python test.py \
+    apptainer exec --env PYTHONPATH="..",TORCH_DISTRIBUTED_DEBUG=DETAIL,NCCL_DEBUG="INFO" ~/env/iart_pytorch_1_11_0_220603.sif python test.py \
     --dataset iconclass_iter --max_traces 5 --num_sanity_val_steps 0 --generate_targets flat yolo ontology clip --labels_path /nfs/data/iart/iconclass/iconclass_txt_en.msg \
     --model image_text_heads --heads ontology --transformer_d_model 768 \
     --mapping_path /nfs/data/iart/iconclass/200817/mapping.jsonl \

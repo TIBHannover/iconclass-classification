@@ -8,9 +8,9 @@ import torch
 import torchvision
 import imageio
 
-from datasets.image_pipeline import IconclassImagePreprocessingPipeline
-from datasets.datasets import DatasetsManager
-from datasets.pipeline import (
+from .image_pipeline import IconclassImagePreprocessingPipeline
+from .datasets import DatasetsManager
+from .pipeline import (
     Pipeline,
     MapDataset,
     MsgPackPipeline,
@@ -22,9 +22,9 @@ from datasets.pipeline import (
     ImagePipeline,
     ConcatPipeline,
 )
-from datasets.utils import read_line_data
+from .utils import read_line_data
 
-from datasets.iconclass import IconclassDataloader
+from .iconclass import IconclassDataloader
 
 
 class IconclassFlattenDecoderPipeline(Pipeline):

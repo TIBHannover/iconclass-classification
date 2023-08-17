@@ -71,6 +71,7 @@ def parse_args():
     parser.add_argument("--progress_refresh_rate", type=int, default=100, help="verbose output")
     parser.add_argument("--wandb_project", default="iart_iconclass", help="verbose output")
     parser.add_argument("--wandb_name", help="verbose output")
+    parser.add_argument("--load_checkpoint", help="verbose output")
     parser.add_argument("--checkpoint_save_interval", type=int, default=2000, help="verbose output")
     parser = pl.Trainer.add_argparse_args(parser)
     parser = DatasetsManager.add_args(parser)
@@ -99,6 +100,11 @@ def main():
     print()
     dataset = DatasetsManager().build_dataset(name=args.dataset, args=args)
     model = ModelsManager().build_model(name=args.model, args=args)
+
+    if args.load_checkpoint:
+        logging.info("load_checkpoint")
+        checkpoint = torch.load(args.load_checkpoint, map_location="cpu")["state_dict"]
+        model.load_state_dict(checkpoint)
 
     if args.output_path is not None:
         os.makedirs(args.output_path, exist_ok=True)
@@ -153,6 +159,7 @@ def main():
         enable_checkpointing=checkpoint_callback,
         # enable_progress_bar=False,
     )
+
     logging.info("Start training")
     trainer.fit(model, train_dataloaders=dataset.train(), val_dataloaders=dataset.val())
 

@@ -6,9 +6,9 @@ import torchvision
 
 from PIL import Image
 
-from datasets.image_pipeline import IconclassImagePreprocessingPipeline, ImageDecodePipeline, RandomResize
-from datasets.datasets import DatasetsManager
-from datasets.pipeline import (
+from .image_pipeline import IconclassImagePreprocessingPipeline, ImageDecodePipeline, RandomResize
+from .datasets import DatasetsManager
+from .pipeline import (
     Pipeline,
     MapDataset,
     MsgPackPipeline,
@@ -20,9 +20,9 @@ from datasets.pipeline import (
     split_chunk_by_nodes,
     split_chunk_by_workers,
 )
-from datasets.utils import read_line_data
+from .utils import read_line_data
 
-from datasets.pad_collate import PadCollate
+from .pad_collate import PadCollate
 
 
 class IconclassDecoderPipeline(Pipeline):
@@ -286,7 +286,6 @@ class IconclassDataloader:
         return ImageDecodePipeline(transforms)
 
     def infer(self):
-
         pipeline = SequencePipeline([ImagePipeline(self.infer_path), self.infer_image_pipeline()])
 
         dataloader = torch.utils.data.DataLoader(

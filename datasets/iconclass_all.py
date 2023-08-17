@@ -5,13 +5,13 @@ import random
 import numpy as np
 import torch
 
-from datasets.datasets import DatasetsManager
-from datasets.pipeline import (
+from .datasets import DatasetsManager
+from .pipeline import (
     Pipeline,
     MapDataset,
 )
-from datasets.utils import read_line_data
-from datasets.iconclass import IconclassDataloader
+from .utils import read_line_data
+from .iconclass import IconclassDataloader
 
 
 def build_level_map(mapping):

@@ -43,8 +43,8 @@ def main():
 
         ax.plot(levels, aps, label=l)
 
-    ax.set_xlabel("hierarchy level")
-    ax.set_ylabel("AP")
+    ax.set_xlabel("Level of Granularity")
+    ax.set_ylabel("mAP")
     ax.legend(loc="upper right")
 
     plt.tight_layout()

@@ -239,7 +239,7 @@ class CosCelHead(nn.Module):
 
         cosine_loss = self.cosine_loss(target, decoder_result)
 
-        return cosine_loss  # + sub_graph_loss / 10
+        return cosine_loss + sub_graph_loss /10
 
     def flat_prediction(self, model, targets, outputs):
         assert "prediction" in outputs, ""

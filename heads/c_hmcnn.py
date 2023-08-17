@@ -179,46 +179,48 @@ class CHMCNNHead(nn.Module):
         # Compute matrix of ancestors R
         # Given n classes, R is an (n x n) matrix where R_ij = 1 if class i is descendant of class j
         self.R = generate_R(self.mapping.values())
+        print("C_HMCNN init done",flush=True)
 
-        self.register_buffer("R_const", self.R)
+        # self.register_buffer("R_const", self.R)
         # exit()
 
     def loss(self, model, targets, outputs):
-
+        print("LOSS", flush=True)
         assert "yolo_target" in targets, ""
         assert "prediction" in outputs, ""
         decoder_result = outputs.get("prediction")
         target = targets.get("yolo_target")
-        R = self.R_const
 
-        weights = self.weights.to(decoder_result.device)
-        filter_mask = self.filter_mask.to(decoder_result.device)
+        R = self.R
+
+        weights = self.weights#.to(decoder_result.device)
+        filter_mask = self.filter_mask#.to(decoder_result.device)
 
         train_output = self.sigmoid(decoder_result)
 
-        constr_output = get_constr_out(train_output, R)
+        constr_output = get_constr_out(train_output.to("cpu").float(), R)
 
         train_output = target * train_output
-        train_output = get_constr_out(train_output, R)
+        train_output = get_constr_out(train_output.to("cpu").float(), R)
 
-        train_output = (1 - target) * constr_output + target * train_output
+        train_output = (1 - target.to("cpu").float()) * constr_output + target.to("cpu").float() * train_output
 
         with torch.autocast(device_type="cuda", enabled=False):
-            loss = self.loss_fn(train_output.float(), target.float()) * weights * filter_mask
+            loss = self.loss_fn(train_output.float(), target.to("cpu").float()) * weights.to("cpu").float() * filter_mask.to("cpu").float()
         predicted = constr_output.data > 0.5
 
-        return torch.sum(loss) / torch.sum(filter_mask)
+        return (torch.sum(loss) / torch.sum(filter_mask)).to(decoder_result.device).type(decoder_result.dtype)
 
     def flat_prediction(self, model, targets, outputs):
         assert "prediction" in outputs, ""
         with torch.no_grad():
             prediction = torch.sigmoid(outputs.get("prediction"))
 
-            prediction = get_constr_out(prediction, self.R_const)
+            prediction = get_constr_out(prediction.to("cpu").float(), self.R)
             if self.use_probability_chain:
                 return build_probability_chain(self.mapping.values(), prediction)
 
-            return prediction
+            return prediction.to(outputs.get("prediction").device)
 
     @classmethod
     def add_args(cls, parent_parser):

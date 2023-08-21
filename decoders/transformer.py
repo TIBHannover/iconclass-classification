@@ -39,23 +39,25 @@ class TransformerLevelWiseDecoder(nn.Module):
         )
 
         total_params = sum(p.numel() for p in self.transformer.parameters())
-        print(f"Number of parameters transformer: {total_params}")
+        print(f"Number of parameters transformer: {total_params}", flush=True)
 
         self.hidden_dim = self.transformer.d_model
 
-        self.embeddings = nn.ModuleList(
-            [nn.Embedding(embedding_size, self.hidden_dim) for x in range(len(vocabulary_sizes))]
-        )
+        # self.embeddings = nn.ModuleList(
+        #     [nn.Embedding(embedding_size, self.hidden_dim) for x in range(len(vocabulary_sizes))]
+        # )
+
+        self.embeddings = nn.Embedding(embedding_size, self.hidden_dim)
 
         total_params = sum(p.numel() for p in self.embeddings.parameters())
-        print(f"Number of parameters embeddings: {total_params}")
+        print(f"Number of parameters embeddings: {total_params}", flush=True)
 
         self.classifiers = nn.ModuleList(
             [nn.Linear(self.hidden_dim, vocabulary_sizes[i]) for i in range(len(vocabulary_sizes))]
         )
 
         total_params = sum(p.numel() for p in self.classifiers.parameters())
-        print(f"Number of parameters classifiers: {total_params}")
+        print(f"Number of parameters classifiers: {total_params}", flush=True)
 
         # Todo add drop out layers
 
@@ -86,8 +88,10 @@ class TransformerLevelWiseDecoder(nn.Module):
         # for x in
         query_embedding = []
         for level in range(src.shape[1]):
-            # print(level, src[:, level])
-            query_embedding.append(self.embeddings[level](src[:, level]))
+            # print("################", level, src[:, level], flush=True)
+            # query_embedding.append(self.embeddings[level](src[:, level]))
+
+            query_embedding.append(self.embeddings(src[:, level]))
         query_embedding = torch.stack(query_embedding)
 
         image_embedding = image_embedding.permute(1, 0, 2)

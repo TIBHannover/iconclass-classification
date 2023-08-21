@@ -22,7 +22,6 @@ from datasets.utils import unflat_dict, flat_dict, get_element
 @EncodersManager.export("open_clip")
 class OpenClip(CLIP):
     def __init__(self, args=None, returned_layers=None, average_pooling=None, **kwargs):
-
         if args is not None:
             dict_args = vars(args)
             dict_args.update(kwargs)
@@ -35,6 +34,8 @@ class OpenClip(CLIP):
         self.visual_model = dict_args.get("visual_model", None)
         self.force_quick_gelu = dict_args.get("force_quick_gelu", None)
         self.load_clip_from_checkpoint = dict_args.get("load_clip_from_checkpoint", None)
+
+        self.flip_ration = dict_args.get("flip_ration", 0.0)
 
         model_name = self.visual_model
 
@@ -85,6 +86,22 @@ class OpenClip(CLIP):
         #     convert_weights_to_fp16(model)
         self.dim = model_cfg["embed_dim"]
 
+    def apply_flip(self, patch_embeddings, drop_rate=0.5):
+        BATCH = 0
+        CHANNEL = 2
+        GRID = 1
+
+        s = torch.rand([patch_embeddings.shape[BATCH], patch_embeddings.shape[GRID]]).to(patch_embeddings.device)
+        ids_shuffle = torch.argsort(s, dim=1)
+        len_keep = int(patch_embeddings.shape[GRID] * drop_rate)
+        ids_keep = ids_shuffle[:, :len_keep]
+
+        result = torch.gather(
+            patch_embeddings, GRID, ids_keep.unsqueeze(CHANNEL).expand(-1, -1, patch_embeddings.shape[CHANNEL])
+        )
+
+        return result
+
     def encode_image(self, image):
         x = self.visual.conv1(image)  # shape = [*, width, grid, grid]
         x = x.reshape(x.shape[0], x.shape[1], -1)  # shape = [*, width, grid ** 2]
@@ -98,6 +115,12 @@ class OpenClip(CLIP):
             dim=1,
         )  # shape = [*, grid ** 2 + 1, width]
         x = x + self.visual.positional_embedding.to(x.dtype)
+
+        # print(f"{ self.flip_ration} { self.training}", flush=True)
+        if self.flip_ration > 0 and self.training:
+            # print(f"111 {x.shape}", flush=True)
+            x = self.apply_flip(x)
+            # print(f"222 {x.shape}", flush=True)
         x = self.visual.ln_pre(x)
 
         x = x.permute(1, 0, 2)  # NLD -> LND
@@ -119,7 +142,6 @@ class OpenClip(CLIP):
         image_features = None
         image_embedding = None
         if image is not None:
-
             image_features, image_embedding = self.encode_image(image)
             image_features = F.normalize(image_features, dim=-1)
 
@@ -145,5 +167,6 @@ class OpenClip(CLIP):
         parser.add_argument("--visual_model", type=str, default="ViT-B-16")
         parser.add_argument("--force_quick_gelu", action="store_true")
         parser.add_argument("--load_clip_from_checkpoint")
+        parser.add_argument("--flip_ration", type=float, default=0.0)
 
         return parser

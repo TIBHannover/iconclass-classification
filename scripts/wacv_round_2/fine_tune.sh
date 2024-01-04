@@ -1,0 +1,289 @@
+sbatch --mem 128G -G 4 -N 1 singularity.sh exec --env PYTHONPATH=".." ~/env/iart_pytorch_1_11_0_220603.sif python train.py \
+    --dataset iconclass_iter \
+    --max_traces 5 \
+    --num_sanity_val_steps 0 \
+    --generate_targets flat yolo ontology clip \
+    --labels_path /nfs/data/iart/iconclass/iconclass_txt_en.msg \
+    --externel_labels_path /nfs/data/iart/iconclass/data_202002/train_label_blib_instruction.jsonl \
+    --model image_text_heads \
+    --heads cos_cel \
+    --load_clip_from_checkpoint  /nfs/home/springsteinm/output/iart/iconclass_wacv_round_2/4x64_clip_blip/v1/epoch=1-step=39999.ckpt \
+    --train_path /nfs/data/iart/iconclass/data_202002/packed/train/msg/ \
+    --train_annotation_path /nfs/data/reflectai/iconclass/unify/iconclass/train.jsonl \
+    --mapping_path /nfs/data/reflectai/iconclass/unify/mapping_trace_counts.jsonl \
+    --classifier_path /nfs/data/reflectai/iconclass/unify/classifiers.jsonl \
+    --val_path /nfs/data/iart/iconclass/data_202002/packed/val/msg/ \
+    --val_annotation_path /nfs/data/reflectai/iconclass/unify/iconclass/val.jsonl \
+    --ontology_path /nfs/data/reflectai/iconclass/unify/ontology.jsonl \
+    --output_path /nfs/home/springsteinm/output/iart/iconclass_wacv_round_2/4x64_clip_blip_fine_cos_cel/v1 \
+    --use_wandb \
+    --wandb_name 4x64_clip_blip_fine_cos_cel/v1 \
+    --lr 1e-4 \
+    --local_loss \
+    --gather_with_grad \
+    --log_every_n_steps 1 \
+    --sched_type cosine \
+    --lr_init 0.0 \
+    --lr_rampup 500 \
+    --lr_rampdown 41000 \
+    --train_size 224 \
+    --use_center_crop \
+    --val_size 224 \
+    --batch_size 64 \
+    --val_check_interval 500000 -v \
+    --checkpoint_save_interval 5000  \
+    --strategy ddp \
+    --precision 16 \
+    --gpus -1  \
+    --weight_decay 1e-01 \
+    --gradient_clip_val 0.5 \
+    --encoder open_clip \
+    --decoder flat \
+    --train_random_trace \
+    --train_merge_one_hot \
+    --max_steps 40000 \
+    --limit_val_batches 8 \
+    --flip_ration 0.5 \
+    --clip_delete_text_tower 
+
+
+sbatch --mem 128G -G 4 -N 1 singularity.sh exec --env PYTHONPATH=".." ~/env/iart_pytorch_1_11_0_220603.sif python train.py \
+    --dataset iconclass_iter \
+    --max_traces 5 \
+    --num_sanity_val_steps 0 \
+    --generate_targets flat yolo ontology clip \
+    --labels_path /nfs/data/iart/iconclass/iconclass_txt_en.msg \
+    --externel_labels_path /nfs/data/iart/iconclass/data_202002/train_label_blib_instruction.jsonl \
+    --model image_text_heads \
+    --heads flat \
+    --load_clip_from_checkpoint  /nfs/home/springsteinm/output/iart/iconclass_wacv_round_2/4x64_clip_blip/v1/epoch=1-step=39999.ckpt \
+    --train_path /nfs/data/iart/iconclass/data_202002/packed/train/msg/ \
+    --train_annotation_path /nfs/data/reflectai/iconclass/unify/iconclass/train.jsonl \
+    --mapping_path /nfs/data/reflectai/iconclass/unify/mapping_trace.jsonl \
+    --classifier_path /nfs/data/reflectai/iconclass/unify/classifiers.jsonl \
+    --val_path /nfs/data/iart/iconclass/data_202002/packed/val/msg/ \
+    --val_annotation_path /nfs/data/reflectai/iconclass/unify/iconclass/val.jsonl \
+    --ontology_path /nfs/data/reflectai/iconclass/unify/ontology.jsonl \
+    --output_path /nfs/home/springsteinm/output/iart/iconclass_wacv_round_2/4x64_clip_blip_fine_flat/v1 \
+    --use_wandb \
+    --wandb_name 4x64_clip_blip_fine_flat/v1 \
+    --lr 1e-4 \
+    --local_loss \
+    --gather_with_grad \
+    --log_every_n_steps 1 \
+    --sched_type cosine \
+    --lr_init 0.0 \
+    --lr_rampup 500 \
+    --lr_rampdown 41000 \
+    --train_size 224 \
+    --use_center_crop \
+    --val_size 224 \
+    --batch_size 64 \
+    --val_check_interval 500000 -v \
+    --checkpoint_save_interval 5000  \
+    --strategy ddp \
+    --precision 16 \
+    --gpus -1  \
+    --weight_decay 1e-01 \
+    --gradient_clip_val 0.5 \
+    --encoder open_clip \
+    --decoder flat \
+    --train_random_trace \
+    --train_merge_one_hot \
+    --max_steps 40000 \
+    --limit_val_batches 8 \
+    --flip_ration 0.5 \
+    --clip_delete_text_tower 
+    
+sbatch --mem 128G -G 4 -N 1 singularity.sh exec --env PYTHONPATH=".." ~/env/iart_pytorch_1_11_0_220603.sif python train.py \
+    --dataset iconclass_iter \
+    --max_traces 5 \
+    --num_sanity_val_steps 0 \
+    --generate_targets flat yolo ontology clip \
+    --labels_path /nfs/data/iart/iconclass/iconclass_txt_en.msg \
+    --externel_labels_path /nfs/data/iart/iconclass/data_202002/train_label_blib_instruction.jsonl \
+    --model image_text_heads \
+    --heads flat \
+    --train_path /nfs/data/iart/iconclass/data_202002/packed/train/msg/ \
+    --train_annotation_path /nfs/data/reflectai/iconclass/unify/iconclass/train.jsonl \
+    --mapping_path /nfs/data/reflectai/iconclass/unify/mapping_trace.jsonl \
+    --classifier_path /nfs/data/reflectai/iconclass/unify/classifiers.jsonl \
+    --val_path /nfs/data/iart/iconclass/data_202002/packed/val/msg/ \
+    --val_annotation_path /nfs/data/reflectai/iconclass/unify/iconclass/val.jsonl \
+    --ontology_path /nfs/data/reflectai/iconclass/unify/ontology.jsonl \
+    --output_path /nfs/home/springsteinm/output/iart/iconclass_wacv_round_2/fine_flat/v1 \
+    --use_wandb \
+    --wandb_name fine_flat/v1 \
+    --lr 1e-4 \
+    --local_loss \
+    --gather_with_grad \
+    --log_every_n_steps 1 \
+    --sched_type cosine \
+    --lr_init 0.0 \
+    --lr_rampup 500 \
+    --lr_rampdown 41000 \
+    --train_size 224 \
+    --use_center_crop \
+    --val_size 224 \
+    --batch_size 64 \
+    --val_check_interval 500000 -v \
+    --checkpoint_save_interval 5000  \
+    --strategy ddp \
+    --precision 16 \
+    --gpus -1  \
+    --weight_decay 1e-01 \
+    --gradient_clip_val 0.5 \
+    --encoder open_clip \
+    --decoder flat \
+    --train_random_trace \
+    --train_merge_one_hot \
+    --max_steps 40000 \
+    --limit_val_batches 8 \
+    --flip_ration 0.5 \
+    --clip_delete_text_tower 
+
+
+sbatch --mem 128G -G 4 -N 1 singularity.sh exec --env PYTHONPATH=".." ~/env/iart_pytorch_1_11_0_220603.sif python train.py \
+    --dataset iconclass_iter \
+    --max_traces 5 \
+    --num_sanity_val_steps 0 \
+    --generate_targets flat yolo ontology clip \
+    --labels_path /nfs/data/iart/iconclass/iconclass_txt_en.msg \
+    --externel_labels_path /nfs/data/iart/iconclass/data_202002/train_label_blib_instruction.jsonl \
+    --model image_text_heads \
+    --heads yolo \
+    --load_clip_from_checkpoint  /nfs/home/springsteinm/output/iart/iconclass_wacv_round_2/4x64_clip_blip/v1/epoch=1-step=39999.ckpt \
+    --train_path /nfs/data/iart/iconclass/data_202002/packed/train/msg/ \
+    --train_annotation_path /nfs/data/reflectai/iconclass/unify/iconclass/train.jsonl \
+    --mapping_path /nfs/data/reflectai/iconclass/unify/mapping_trace.jsonl \
+    --classifier_path /nfs/data/reflectai/iconclass/unify/classifiers.jsonl \
+    --val_path /nfs/data/iart/iconclass/data_202002/packed/val/msg/ \
+    --val_annotation_path /nfs/data/reflectai/iconclass/unify/iconclass/val.jsonl \
+    --ontology_path /nfs/data/reflectai/iconclass/unify/ontology.jsonl \
+    --output_path /nfs/home/springsteinm/output/iart/iconclass_wacv_round_2/4x64_clip_blip_fine_yolo/v1 \
+    --use_wandb \
+    --wandb_name 4x64_clip_blip_fine_yolo/v1 \
+    --lr 1e-4 \
+    --local_loss \
+    --gather_with_grad \
+    --log_every_n_steps 1 \
+    --sched_type cosine \
+    --lr_init 1.0 \
+    --lr_rampup 500 \
+    --lr_rampdown 41000 \
+    --train_size 224 \
+    --use_center_crop \
+    --val_size 224 \
+    --batch_size 64 \
+    --val_check_interval 500000 -v \
+    --checkpoint_save_interval 5000  \
+    --strategy ddp \
+    --precision 16 \
+    --gpus -1  \
+    --weight_decay 1e-01 \
+    --gradient_clip_val 0.5 \
+    --encoder open_clip \
+    --decoder flat \
+    --train_random_trace \
+    --train_merge_one_hot \
+    --max_steps 40000 \
+    --limit_val_batches 8 \
+    --flip_ration 0.5 \
+    --clip_delete_text_tower 
+
+
+sbatch -w devbox5 --mem 128G -G 4 -N 1 singularity.sh exec --env PYTHONPATH=.. ~/env/iart_pytorch_1_11_0_220603.sif python train.py \
+--dataset iconclass_iter \
+--max_traces 5 \
+--num_sanity_val_steps 0 \
+--generate_targets flat yolo ontology clip \
+--labels_path /nfs/data/iart/iconclass/iconclass_txt_en.msg \
+--externel_labels_path /nfs/data/iart/iconclass/data_202002/train_label_blib_instruction.jsonl \
+--model image_text_heads \
+--heads ontology  clip \
+--transformer_d_model 768 \
+--resume_from_checkpoint /nfs/home/springsteinm/output/iart/iconclass_wacv_round_2/4x64_clip_blip_fine_onto_clip/v1/epoch=0-step=20999.ckpt \
+--load_clip_from_checkpoint  /nfs/home/springsteinm/output/iart/iconclass_wacv_round_2/4x64_clip_blip/v1/epoch=1-step=39999.ckpt \
+--train_path /nfs/data/iart/iconclass/data_202002/packed/train/msg/ \
+--train_annotation_path /nfs/data/reflectai/iconclass/unify/iconclass/train.jsonl \
+--mapping_path /nfs/data/reflectai/iconclass/unify/mapping_trace.jsonl \
+--classifier_path /nfs/data/reflectai/iconclass/unify/classifiers.jsonl \
+--val_path /nfs/data/iart/iconclass/data_202002/packed/val/msg/ \
+--val_annotation_path /nfs/data/reflectai/iconclass/unify/iconclass/val.jsonl \
+--ontology_path /nfs/data/reflectai/iconclass/unify/ontology.jsonl \
+--output_path /nfs/home/springsteinm/output/iart/iconclass_wacv_round_2/4x64_clip_blip_fine_onto_clip/v1 \
+--use_wandb \
+--wandb_name 4x64_clip_blip_fine_onto_clip/v1 \
+--lr 1e-4 \
+--local_loss \
+--gather_with_grad \
+--log_every_n_steps 1000 \
+--sched_type cosine \
+--lr_init 0.0 \
+--lr_rampup 500 \
+--lr_rampdown 41000  \
+--train_size 224 \
+--use_center_crop \
+--val_size 224 \
+--batch_size 64 \
+--val_check_interval 100000 -v \
+--checkpoint_save_interval 1000  \
+--strategy ddp \
+--precision 16 \
+--gpus -1  \
+--flip_ration 0.5 \
+--weight_decay 1e-01 \
+--gradient_clip_val 0.5 \
+--encoder open_clip \
+--decoder transformer_level_wise \
+--train_random_trace \
+--train_merge_one_hot \
+--max_steps 40000 \
+--limit_val_batches 8
+
+
+sbatch -c 4 --mem 96G -G 4 -N 1 singularity.sh exec --env PYTHONPATH=".." ~/env/iart_pytorch_1_11_0_220603.sif python train.py \
+    --dataset iconclass_iter \
+    --max_traces 5 \
+    --num_sanity_val_steps 0 \
+    --generate_targets flat yolo ontology clip \
+    --labels_path /nfs/data/iart/iconclass/iconclass_txt_en.msg \
+    --externel_labels_path /nfs/data/iart/iconclass/data_202002/train_label_blib_instruction.jsonl \
+    --model image_text_heads \
+    --heads flat \
+    --train_path /nfs/data/iart/iconclass/data_202002/packed/train/msg/ \
+    --train_annotation_path /nfs/data/reflectai/iconclass/unify/iconclass/train.jsonl \
+    --mapping_path /nfs/data/reflectai/iconclass/unify/mapping_trace.jsonl \
+    --classifier_path /nfs/data/reflectai/iconclass/unify/classifiers.jsonl \
+    --val_path /nfs/data/iart/iconclass/data_202002/packed/val/msg/ \
+    --val_annotation_path /nfs/data/reflectai/iconclass/unify/iconclass/val.jsonl \
+    --ontology_path /nfs/data/reflectai/iconclass/unify/ontology.jsonl \
+    --output_path /nfs/home/springsteinm/output/iart/iconclass_wacv_round_2/fine_flat_no_flip/v1 \
+    --use_wandb \
+    --wandb_name fine_flat_no_flip/v1 \
+    --lr 1e-4 \
+    --local_loss \
+    --gather_with_grad \
+    --log_every_n_steps 1 \
+    --sched_type cosine \
+    --lr_init 0.0 \
+    --lr_rampup 500 \
+    --lr_rampdown 41000 \
+    --train_size 224 \
+    --use_center_crop \
+    --val_size 224 \
+    --batch_size 64 \
+    --val_check_interval 500000 -v \
+    --checkpoint_save_interval 5000  \
+    --strategy ddp \
+    --precision 16 \
+    --gpus -1  \
+    --weight_decay 1e-01 \
+    --gradient_clip_val 0.5 \
+    --encoder open_clip \
+    --decoder flat \
+    --train_random_trace \
+    --train_merge_one_hot \
+    --max_steps 40000 \
+    --limit_val_batches 8 \
+    --clip_delete_text_tower 

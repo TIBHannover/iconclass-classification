@@ -31,10 +31,9 @@ class IconclassTextGenerator(IterDataPipe):
         self.input_field = input_field if input_field else "classes"
         self.output_field = output_field if output_field else "txt"
         self.shuffle = shuffle
-        self.join = join if join else "+ "
+        self.join = join if join else ", "
 
     def __iter__(self):
-
         for sample in self.dp:
             classes = sample.get(self.input_field, None)
 
@@ -50,7 +49,7 @@ class IconclassTextGenerator(IterDataPipe):
                     classes = random.sample(classes, min(self.num_labels, len(classes)))
                 else:
                     classes = classes[: min(self.num_labels, len(classes))]
-
+            # exit()
             class_texts = []
             for c in classes:
                 class_text = self.labels.get(c, None)
@@ -58,6 +57,7 @@ class IconclassTextGenerator(IterDataPipe):
                     class_texts.append(class_text)
 
             classes_text = self.join.join(class_texts)
+            # print(f"\n############ {self.num_labels}, {classes}, {classes_text}", flush=True)
 
             yield {**sample, self.output_field: classes_text}
 
@@ -79,7 +79,6 @@ class IconclassExternalTextGenerator(IterDataPipe):
         self.shuffle = shuffle
 
     def __iter__(self):
-
         for sample in self.dp:
             sample_key = sample.get(self.input_field, None)
 
@@ -101,16 +100,19 @@ class IconclassExternalTextGenerator(IterDataPipe):
 
 @functional_datapipe("tokenize_openclip")
 class TokenizeOpenClip(IterDataPipe):
-    def __init__(self, dp, input_field: str = None, output_field: str = None) -> None:
+    def __init__(self, dp, context_length: int = 77, input_field: str = None, output_field: str = None) -> None:
         self.dp = dp
         self.input_field = input_field if input_field else "txt"
         self.output_field = output_field if output_field else "clip_embedding"
+        self.context_length = context_length if context_length else 77
 
     def __iter__(self) -> Iterator[Dict]:
         import open_clip
 
         for sample in self.dp:
-            embedding = torch.squeeze(open_clip.tokenize([sample.get(self.input_field)]))
+            embedding = torch.squeeze(
+                open_clip.tokenize([sample.get(self.input_field)], context_length=self.context_length)
+            )
             yield {**sample, self.output_field: embedding}
 
 
@@ -124,7 +126,6 @@ class MsgPackLoader(IterDataPipe):
 
         for path in self.dp:
             with open(path, "rb") as f:
-
                 unpacker = msgpack.Unpacker(f, max_buffer_size=1024 * 1024 * 1024, raw=True)
 
                 for x in unpacker:
@@ -138,7 +139,6 @@ class IconclassDecoderPipeline(IterDataPipe):
         self.annotation = annotation
 
     def __iter__(self) -> Iterator[Dict]:
-
         for sample in self.dp:
             out_sample = {
                 "image_data": sample[b"image"],
@@ -165,7 +165,6 @@ class FlatTargetBuilder(IterDataPipe):
         self.mapping = mapping
 
     def __iter__(self) -> Iterator[Dict]:
-
         for sample in self.dp:
             y_onehot_flat = torch.zeros(len(self.mapping))
 
@@ -183,7 +182,6 @@ class YOLOTargetBuilder(IterDataPipe):
         self.classifier = classifier
 
     def __iter__(self) -> Iterator[Dict]:
-
         for sample in self.dp:
             result = {}
             y_onehot_yolo_labels = torch.zeros(len(self.mapping))
@@ -233,7 +231,6 @@ class OntologyTargetBuilder(IterDataPipe):
         self.level_map = level_map
 
     def __iter__(self) -> Iterator[Dict]:
-
         for sample in self.dp:
             if len(sample["classes"]) == 0:
                 # continue
@@ -369,14 +366,11 @@ class SrongImageAugmenter(IterDataPipe):
         )
 
     def __iter__(self) -> Iterator[Dict]:
-
         for sample in self.dp:
             image = imageio.imread(sample["image_data"])
 
             if self.min_size is not None and self.min_size > 0:
-
                 if image.shape[0] < self.min_size or image.shape[1] < self.min_size:
-
                     continue
             image = self.transformation(image)
             yield {**sample, "image": image}
@@ -401,14 +395,11 @@ class WeakImageAugmenter(IterDataPipe):
         )
 
     def __iter__(self) -> Iterator[Dict]:
-
         for sample in self.dp:
             image = imageio.imread(sample["image_data"])
 
             if self.min_size is not None and self.min_size > 0:
-
                 if image.shape[0] < self.min_size or image.shape[1] < self.min_size:
-
                     continue
             image = self.transformation(image)
             yield {**sample, "image": image}
@@ -431,14 +422,11 @@ class ValImage(IterDataPipe):
         )
 
     def __iter__(self) -> Iterator[Dict]:
-
         for sample in self.dp:
             image = imageio.imread(sample["image_data"])
 
             if self.min_size is not None and self.min_size > 0:
-
                 if image.shape[0] < self.min_size or image.shape[1] < self.min_size:
-
                     continue
             image = self.transformation(image)
             yield {**sample, "image": image}
@@ -451,7 +439,6 @@ class SampleCleaner(IterDataPipe):
         self.keys = keys
 
     def __iter__(self) -> Iterator[Dict]:
-
         for sample in self.dp:
             for key in self.keys:
                 if key in sample:

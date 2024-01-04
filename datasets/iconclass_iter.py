@@ -122,6 +122,7 @@ class IconclassIterDataloader:
             self.ontology = read_line_data(self.ontology_path)
 
         self.max_traces = dict_args.get("max_traces", None)
+        self.context_length = dict_args.get("context_length", None)
 
         self.train_random_trace = dict_args.get("train_random_trace", None)
         self.train_merge_one_hot = dict_args.get("train_merge_one_hot", None)
@@ -196,7 +197,7 @@ class IconclassIterDataloader:
                 dp = dp.iconclass_externel_text(labels=self.externel_labels, shuffle=True)
             else:
                 dp = dp.iconclass_text(labels=self.labels, shuffle=True)
-            dp = dp.tokenize_openclip()
+            dp = dp.tokenize_openclip(context_length=self.context_length)
         dp = dp.augment_strong_image(output_size=self.train_size)
         dp = dp.clean_sample(
             [
@@ -261,7 +262,7 @@ class IconclassIterDataloader:
 
         if "clip" in self.generate_targets:
             dp = dp.iconclass_text(labels=self.labels, shuffle=False)
-            dp = dp.tokenize_openclip()
+            dp = dp.tokenize_openclip(context_length=self.context_length)
         dp = dp.val_image(output_size=self.val_size)
         dp = dp.clean_sample(
             [
@@ -321,7 +322,7 @@ class IconclassIterDataloader:
 
         if "clip" in self.generate_targets:
             dp = dp.iconclass_text(labels=self.labels, shuffle=False)
-            dp = dp.tokenize_openclip()
+            dp = dp.tokenize_openclip(context_length=self.context_length)
         dp = dp.val_image(output_size=self.val_size)
         dp = dp.clean_sample(
             [
@@ -402,5 +403,6 @@ class IconclassIterDataloader:
         parser.add_argument("--train_random_trace", action="store_true")
         parser.add_argument("--train_merge_one_hot", action="store_true")
         parser.add_argument("--generate_targets", choices=("flat", "yolo", "clip", "ontology"), nargs="+")
+        parser.add_argument("--context_length", type=int, default=77)
 
         return parser

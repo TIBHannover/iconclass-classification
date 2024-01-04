@@ -97,7 +97,6 @@ def main():
 
     pl.seed_everything(42)
 
-    print()
     dataset = DatasetsManager().build_dataset(name=args.dataset, args=args)
     model = ModelsManager().build_model(name=args.model, args=args)
 
@@ -117,6 +116,8 @@ def main():
     #     logger = TensorBoardLogger(save_dir=args.output_path, name="summary")
 
     #     callbacks.extend([TensorBoardLogImageCallback])
+
+    logger = None
     if args.use_wandb:
         name = f"{args.model}"
         if hasattr(args, "encoder"):
@@ -127,13 +128,12 @@ def main():
 
         if args.wandb_name is not None:
             name = args.wandb_name
-        logger = WandbLogger(project=args.wandb_project, log_model=False, name=name)
-        logger.watch(model)
-        callbacks.extend([pl.callbacks.LearningRateMonitor()])
+        # logger = WandbLogger(project=args.wandb_project, log_model=False, name=name)
+        # logger.watch(model)
+        # callbacks.extend([pl.callbacks.LearningRateMonitor()])
         # callbacks.extend([WandbLogImageCallback()])
     else:
         logging.warning("No logger available")
-        logger = None
 
     if version.parse(pl.__version__) < version.parse("1.4"):
         checkpoint_callback = ModelCheckpoint(
@@ -158,9 +158,10 @@ def main():
         logger=logger,
         enable_checkpointing=checkpoint_callback,
         # enable_progress_bar=False,
+        auto_select_gpus=False,
     )
 
-    logging.info("Start training")
+    logging.info(f"Start training {args.output_path}")
     trainer.fit(model, train_dataloaders=dataset.train(), val_dataloaders=dataset.val())
 
     return 0

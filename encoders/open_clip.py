@@ -31,12 +31,16 @@ class OpenClip(CLIP):
         self.returned_layers = returned_layers
 
         self.pretrained = dict_args.get("pretrained", None)
+        self.skip_loading_pretrained = dict_args.get("skip_loading_pretrained", None)
         self.visual_model = dict_args.get("visual_model", None)
         self.force_quick_gelu = dict_args.get("force_quick_gelu", None)
         self.load_clip_from_checkpoint = dict_args.get("load_clip_from_checkpoint", None)
 
         self.flip_ration = dict_args.get("flip_ration", 0.0)
-
+        self.new_context_length = dict_args.get("context_length", None)
+        # print(dict_args.get("context_length", None))
+        # exit()
+        self.clip_delete_text_tower = dict_args.get("clip_delete_text_tower", None)
         model_name = self.visual_model
 
         #  copy from open_clip
@@ -55,17 +59,7 @@ class OpenClip(CLIP):
 
         super(OpenClip, self).__init__(**model_cfg)
 
-        if self.load_clip_from_checkpoint:
-            state_dict = torch.load(self.load_clip_from_checkpoint)["state_dict"]
-            # for x in state_dict:
-            #     print(x)
-            # state_dict = {k: v for k, v in state_dict}
-            state_dict = flat_dict(unflat_dict(state_dict)["encoder"])
-            # print(state_dict.keys())
-            self.load_state_dict(state_dict)
-            # exit()
-
-        elif self.pretrained:
+        if self.pretrained and not self.skip_loading_pretrained and not self.load_clip_from_checkpoint:
             checkpoint_path = ""
             url = get_pretrained_url(model_name, self.pretrained)
             if url:
@@ -85,6 +79,49 @@ class OpenClip(CLIP):
         #     assert device.type != 'cpu'
         #     convert_weights_to_fp16(model)
         self.dim = model_cfg["embed_dim"]
+
+        if self.new_context_length > self.positional_embedding.shape[0]:
+            logging.warning(f"Try to increase position embedding for context_length {self.new_context_length}")
+            self.additional_positional_embedding = torch.empty(
+                self.new_context_length - self.positional_embedding.shape[0], self.positional_embedding.shape[1]
+            )
+            nn.init.normal_(self.additional_positional_embedding, std=0.01)
+            self.positional_embedding = nn.Parameter(
+                torch.concat(
+                    [
+                        self.positional_embedding,
+                        self.additional_positional_embedding,
+                    ],
+                    axis=0,
+                ),
+            )
+            logging.warning(f"New positional_embedding embedding size {self.positional_embedding.shape}")
+
+            mask = torch.empty(self.new_context_length, self.new_context_length)
+            mask.fill_(float("-inf"))
+            mask.triu_(1)  # zero out the lower diagonal
+
+            self.register_buffer("attn_mask", mask, persistent=False)
+            # self.text.register_buffer('attn_mask', mask, persistent=False)
+        # print(self.new_context_length, self.positional_embedding.shape[0])
+        # exit()#
+        if self.load_clip_from_checkpoint:
+            state_dict = torch.load(self.load_clip_from_checkpoint, map_location="cpu")["state_dict"]
+            # for x in state_dict:
+            #     print(x)
+            # state_dict = {k: v for k, v in state_dict}
+            state_dict = flat_dict(unflat_dict(state_dict)["encoder"])
+            # print(state_dict.keys())
+            self.load_state_dict(state_dict)
+            # exit()
+
+        if self.clip_delete_text_tower:
+            logging.warning("Delete text encoder")
+            delattr(self, "transformer")
+            delattr(self, "token_embedding")
+            delattr(self, "positional_embedding")
+            delattr(self, "ln_final")
+            delattr(self, "text_projection")
 
     def apply_flip(self, patch_embeddings, drop_rate=0.5):
         BATCH = 0
@@ -146,7 +183,8 @@ class OpenClip(CLIP):
             image_features = F.normalize(image_features, dim=-1)
 
         text_features = None
-        if text is not None:
+        if text is not None and not self.clip_delete_text_tower:
+            # print(f"####### {text.shape}", flush=True)
             text_features = self.encode_text(text)
             text_features = F.normalize(text_features, dim=-1)
 
@@ -164,9 +202,13 @@ class OpenClip(CLIP):
         # args, _ = parser.parse_known_args()
         # if "classifier_path" not in args:
         parser.add_argument("--pretrained", type=str, default="laion400m_e32")
+        parser.add_argument("--skip_loading_pretrained", action="store_true")
         parser.add_argument("--visual_model", type=str, default="ViT-B-16")
         parser.add_argument("--force_quick_gelu", action="store_true")
         parser.add_argument("--load_clip_from_checkpoint")
-        parser.add_argument("--flip_ration", type=float, default=0.0)
 
+        parser.add_argument("--flip_ration", type=float, default=0.0)
+        parser.add_argument("--context_length", type=int, default=77)
+
+        parser.add_argument("--clip_delete_text_tower", action="store_true")
         return parser

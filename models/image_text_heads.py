@@ -145,7 +145,7 @@ class ImageTextHeads(BaseModel):
         # self.jaccard = JaccardIndex(num_classes=len(self.mapping_config), multilabel=True)
         # self.cosine = CosineSimilarity(reduction="mean")
 
-        self.cosine = {h.name: CosineSimilarity(reduction="mean") for h in self.heads if hasattr(h, "flat_prediction")}
+        # self.cosine = {h.name: CosineSimilarity(reduction="mean") for h in self.heads if hasattr(h, "flat_prediction")}
 
         if self.load_model_from_checkpoint:
             state_dict = torch.load(self.load_model_from_checkpoint)["state_dict"]
@@ -220,10 +220,10 @@ class ImageTextHeads(BaseModel):
         decoder_outputs = self.decoder({**encoder_outputs, **batch})
 
         losses = []
-        for head in self.heads:
-            if hasattr(head, "flat_prediction"):
-                flat_prediction = head.flat_prediction(self, batch, {**encoder_outputs, **decoder_outputs})
-                self.cosine[head.name](flat_prediction, batch["yolo_target"])
+        # for head in self.heads:
+        #     if hasattr(head, "flat_prediction"):
+        #         flat_prediction = head.flat_prediction(self, batch, {**encoder_outputs, **decoder_outputs})
+        #         self.cosine[head.name](flat_prediction, batch["yolo_target"])
 
         losses = []
         for head in self.heads:
@@ -243,11 +243,10 @@ class ImageTextHeads(BaseModel):
 
         self.log("val/loss", loss / count, prog_bar=True)
 
-        for head_name, metric in self.cosine.items():
-
-            self.log(f"val/{head_name}/cosine", metric.compute(), prog_bar=True)
-            # self.jaccard.reset()
-            metric.reset()
+        # for head_name, metric in self.cosine.items():
+        #     self.log(f"val/{head_name}/cosine", metric.compute(), prog_bar=True)
+        #     # self.jaccard.reset()
+        #     metric.reset()
 
     def test_step(self, batch, batch_idx):
         logging.info("test_step")
@@ -320,7 +319,6 @@ class ImageTextHeads(BaseModel):
             lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, exp_lr)
 
         elif self.sched_type == "step":
-
             lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, self.step_size)
 
         # optimizer = torch.optim.SGD(
